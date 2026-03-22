@@ -1,0 +1,76 @@
+openapi: 3.0.3
+info:
+  title: Pixora API
+  version: 0.1.0
+servers:
+  - url: /api/v1
+security:
+  - bearerAuth: []
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    Group:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+    Photo:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        groupId: { type: string, format: uuid }
+        status: { type: string, enum: [queued, processing, processed, failed] }
+    UploadUrlResponse:
+      type: object
+      properties:
+        uploadUrl: { type: string }
+        storageKey: { type: string }
+paths:
+  /me:
+    get:
+      summary: Get current profile
+      responses:
+        '200':
+          description: OK
+  /groups:
+    get:
+      summary: List groups
+      responses:
+        '200': { description: OK }
+    post:
+      summary: Create group
+      responses:
+        '201': { description: Created }
+  /groups/{groupId}/photos/upload-url:
+    post:
+      summary: Get signed upload URL
+      parameters:
+        - in: path
+          name: groupId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadUrlResponse'
+  /groups/{groupId}/photos:
+    post:
+      summary: Register uploaded photo
+      responses:
+        '201': { description: Created }
+    get:
+      summary: List group photos
+      responses:
+        '200': { description: OK }
+  /shares/me:
+    get:
+      summary: List photos shared with me
+      responses:
+        '200': { description: OK }

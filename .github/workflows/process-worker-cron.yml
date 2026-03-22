@@ -1,0 +1,38 @@
+name: Process Worker Cron
+
+on:
+  schedule:
+    - cron: "* * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  run-worker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Trigger process-next endpoint
+        env:
+          PIXORA_BASE_URL: ${{ secrets.PIXORA_BASE_URL }}
+          INTERNAL_WORKER_TOKEN: ${{ secrets.INTERNAL_WORKER_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${PIXORA_BASE_URL:-}" ]]; then
+            echo "Missing PIXORA_BASE_URL secret"
+            exit 1
+          fi
+
+          if [[ -z "${INTERNAL_WORKER_TOKEN:-}" ]]; then
+            echo "Missing INTERNAL_WORKER_TOKEN secret"
+            exit 1
+          fi
+
+          RESPONSE=$(curl --silent --show-error --fail-with-body \
+            -X POST "${PIXORA_BASE_URL%/}/api/v1/internal/process-next" \
+            -H "Authorization: Bearer ${INTERNAL_WORKER_TOKEN}" \
+            -H "Content-Type: application/json")
+
+          echo "Worker response: ${RESPONSE}"

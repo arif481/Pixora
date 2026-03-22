@@ -1,0 +1,22 @@
+# Node
+node_modules/
+.npm/
+.next/
+out/
+
+# Env
+.env
+.env.local
+.env.*.local
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Logs
+*.log
+
+# OS
+.DS_Store
