@@ -1,7 +1,7 @@
 import os
 from fastapi import FastAPI, Header, HTTPException
 
-from .engine import cosine_similarity, detect_faces_real, detect_faces_sim
+from .engine import cosine_similarity, detect_faces_real
 from .schemas import (
     DetectEmbedRequest,
     DetectEmbedResponse,
@@ -17,22 +17,20 @@ app = FastAPI(title="Pixora Face Engine", version="0.1.0")
 
 MODEL_VERSION = os.getenv("MODEL_NAME", "buffalo_l")
 ENGINE_AUTH_TOKEN = os.getenv("ENGINE_AUTH_TOKEN", "change-me")
-ENGINE_MODE = os.getenv("ENGINE_MODE", "simulated").strip().lower()
+ENGINE_MODE = os.getenv("ENGINE_MODE", "real").strip().lower()
 MAX_IMAGE_MB = int(os.getenv("MAX_IMAGE_MB", "15"))
-ALLOW_SIM_FALLBACK = os.getenv("ALLOW_SIM_FALLBACK", "true").strip().lower() == "true"
 MIN_ENROLL_QUALITY = float(os.getenv("MIN_ENROLL_QUALITY", "0.5"))
 
 
 def _detect_faces(image_url: str):
-    if ENGINE_MODE in {"real", "production", "insightface"}:
-        try:
-            return detect_faces_real(image_url=image_url, model_name=MODEL_VERSION, max_image_mb=MAX_IMAGE_MB), "real"
-        except Exception:
-            if not ALLOW_SIM_FALLBACK:
-                raise
-            return detect_faces_sim(image_url), "simulated-fallback"
+    if ENGINE_MODE not in {"real", "production", "insightface"}:
+        raise RuntimeError("ENGINE_MODE must be set to 'real'")
 
-    return detect_faces_sim(image_url), "simulated"
+    return detect_faces_real(
+        image_url=image_url,
+        model_name=MODEL_VERSION,
+        max_image_mb=MAX_IMAGE_MB,
+    ), "real"
 
 
 def verify_token(authorization: str | None) -> None:
@@ -49,7 +47,6 @@ def health() -> dict:
         "ok": True,
         "model_version": MODEL_VERSION,
         "engine_mode": ENGINE_MODE,
-        "allow_sim_fallback": ALLOW_SIM_FALLBACK,
         "max_image_mb": MAX_IMAGE_MB,
     }
 

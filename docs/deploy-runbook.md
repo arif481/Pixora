@@ -21,28 +21,18 @@
 
 ## 2) Configure face engine mode
 
-Choose one mode:
-
-### Mode A (default): Internal simulation engine
-
-In Vercel production env set:
-
-- `FACE_ENGINE_URL` = `https://<your-web-domain>/api/v1/internal/face-engine`
-- `FACE_ENGINE_TOKEN` = any strong secret string (used for internal service auth)
-
-### Mode B (recommended for real face recognition): External real inference service
+Use external real inference service:
 
 1. Deploy `services/face-engine` to a Python host (Render/Railway/Fly/etc).
 2. Set service env vars:
   - `ENGINE_MODE=real`
   - `MODEL_NAME=buffalo_l`
-  - `ALLOW_SIM_FALLBACK=false`
   - `ENGINE_AUTH_TOKEN=<strong-secret>`
 3. In web production env set:
   - `FACE_ENGINE_URL=https://<face-engine-domain>`
   - `FACE_ENGINE_TOKEN=<same ENGINE_AUTH_TOKEN>`
 
-Redeploy web after updating env vars in either mode:
+Redeploy web after updating env vars:
 
 - `vercel --prod`
 

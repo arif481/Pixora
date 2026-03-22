@@ -26,8 +26,7 @@
 
 ## Face engine deployment modes
 
-- Internal simulation (default): set `FACE_ENGINE_URL` to `https://<web-domain>/api/v1/internal/face-engine`.
-- External real inference: deploy `services/face-engine` with `ENGINE_MODE=real`, then set `FACE_ENGINE_URL` to that service URL.
+- External real inference is required: deploy `services/face-engine` with `ENGINE_MODE=real`, then set `FACE_ENGINE_URL` to that service URL.
 
 ## Auth behavior
 
