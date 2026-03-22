@@ -1,7 +1,7 @@
 import os
 from fastapi import FastAPI, Header, HTTPException
 
-from .engine import cosine_similarity, detect_faces_sim, stable_embedding
+from .engine import cosine_similarity, detect_faces_real, detect_faces_sim
 from .schemas import (
     DetectEmbedRequest,
     DetectEmbedResponse,
@@ -15,8 +15,24 @@ from .schemas import (
 
 app = FastAPI(title="Pixora Face Engine", version="0.1.0")
 
-MODEL_VERSION = os.getenv("MODEL_NAME", "sim-v1")
+MODEL_VERSION = os.getenv("MODEL_NAME", "buffalo_l")
 ENGINE_AUTH_TOKEN = os.getenv("ENGINE_AUTH_TOKEN", "change-me")
+ENGINE_MODE = os.getenv("ENGINE_MODE", "simulated").strip().lower()
+MAX_IMAGE_MB = int(os.getenv("MAX_IMAGE_MB", "15"))
+ALLOW_SIM_FALLBACK = os.getenv("ALLOW_SIM_FALLBACK", "true").strip().lower() == "true"
+MIN_ENROLL_QUALITY = float(os.getenv("MIN_ENROLL_QUALITY", "0.5"))
+
+
+def _detect_faces(image_url: str):
+    if ENGINE_MODE in {"real", "production", "insightface"}:
+        try:
+            return detect_faces_real(image_url=image_url, model_name=MODEL_VERSION, max_image_mb=MAX_IMAGE_MB), "real"
+        except Exception:
+            if not ALLOW_SIM_FALLBACK:
+                raise
+            return detect_faces_sim(image_url), "simulated-fallback"
+
+    return detect_faces_sim(image_url), "simulated"
 
 
 def verify_token(authorization: str | None) -> None:
@@ -29,18 +45,41 @@ def verify_token(authorization: str | None) -> None:
 
 @app.get("/health")
 def health() -> dict:
-    return {"ok": True, "model_version": MODEL_VERSION}
+    return {
+        "ok": True,
+        "model_version": MODEL_VERSION,
+        "engine_mode": ENGINE_MODE,
+        "allow_sim_fallback": ALLOW_SIM_FALLBACK,
+        "max_image_mb": MAX_IMAGE_MB,
+    }
 
 
 @app.post("/enroll", response_model=EnrollResponse)
 def enroll(image_url: str, authorization: str | None = Header(default=None)) -> EnrollResponse:
     verify_token(authorization)
-    embedding = stable_embedding(f"enroll:{image_url}")
+    detected_faces, mode_used = _detect_faces(image_url)
+    if not detected_faces:
+        return EnrollResponse(
+            model_version=MODEL_VERSION,
+            quality_passed=False,
+            embedding=None,
+            flags=["no-face-detected"],
+        )
+
+    detected_faces.sort(key=lambda item: (item[2] * item[3], item[4]), reverse=True)
+    _x, _y, _w, _h, quality, embedding = detected_faces[0]
+
+    flags: list[str] = []
+    if len(detected_faces) > 1:
+        flags.append("multiple-faces-detected")
+    if quality < MIN_ENROLL_QUALITY:
+        flags.append("low-face-quality")
+
     return EnrollResponse(
-        model_version=MODEL_VERSION,
-        quality_passed=True,
+        model_version=f"{MODEL_VERSION}:{mode_used}",
+        quality_passed=quality >= MIN_ENROLL_QUALITY,
         embedding=embedding,
-        flags=[],
+        flags=flags,
     )
 
 
@@ -51,7 +90,8 @@ def detect_and_embed(
 ) -> DetectEmbedResponse:
     verify_token(authorization)
     faces = []
-    for x, y, w, h, quality, embedding in detect_faces_sim(payload.image_url):
+    detections, mode_used = _detect_faces(payload.image_url)
+    for x, y, w, h, quality, embedding in detections:
         faces.append(
             FaceEmbedding(
                 bbox=FaceBox(x=x, y=y, w=w, h=h),
@@ -60,7 +100,7 @@ def detect_and_embed(
             )
         )
 
-    return DetectEmbedResponse(model_version=MODEL_VERSION, faces=faces)
+    return DetectEmbedResponse(model_version=f"{MODEL_VERSION}:{mode_used}", faces=faces)
 
 
 @app.post("/match", response_model=MatchResponse)

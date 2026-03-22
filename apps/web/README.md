@@ -24,6 +24,11 @@
 - Add scheduled trigger (Vercel cron/GitHub Actions) to call `POST /api/v1/internal/process-next`.
 - Add confidence tuning and duplicate-face suppression strategies.
 
+## Face engine deployment modes
+
+- Internal simulation (default): set `FACE_ENGINE_URL` to `https://<web-domain>/api/v1/internal/face-engine`.
+- External real inference: deploy `services/face-engine` with `ENGINE_MODE=real`, then set `FACE_ENGINE_URL` to that service URL.
+
 ## Auth behavior
 
 - Production mode expects `Authorization: Bearer <supabase_access_token>`.

@@ -1,11 +1,21 @@
 from __future__ import annotations
 
 import hashlib
-from typing import List, Tuple
+import math
+from typing import List, Optional, Tuple
 
+import httpx
 import numpy as np
+from fastapi import HTTPException
 
 EMBEDDING_SIZE = 512
+REQUEST_TIMEOUT_SECONDS = 20
+
+_ANALYZER = None
+
+
+def _to_quality(score: float) -> float:
+  return max(0.0, min(1.0, float(score)))
 
 
 def _seed_from_text(value: str) -> int:
@@ -27,6 +37,94 @@ def detect_faces_sim(image_url: str) -> List[Tuple[int, int, int, int, float, Li
   return [
     (120, 80, 190, 190, 0.93, base_embedding),
   ]
+
+
+def fetch_image_bytes(image_url: str, max_image_mb: int) -> bytes:
+  max_size = max_image_mb * 1024 * 1024
+  try:
+    response = httpx.get(image_url, timeout=REQUEST_TIMEOUT_SECONDS, follow_redirects=True)
+    response.raise_for_status()
+  except Exception as error:
+    raise HTTPException(status_code=400, detail=f"Failed to fetch image: {error}") from error
+
+  content_type = response.headers.get("content-type", "")
+  if "image" not in content_type:
+    raise HTTPException(status_code=400, detail="URL does not point to an image")
+
+  payload = response.content
+  if len(payload) > max_size:
+    raise HTTPException(status_code=413, detail=f"Image too large (>{max_image_mb}MB)")
+
+  return payload
+
+
+def decode_image_bytes(payload: bytes) -> np.ndarray:
+  try:
+    import cv2  # type: ignore
+  except Exception as error:
+    raise RuntimeError("opencv-python-headless is required for real inference mode") from error
+
+  matrix = np.frombuffer(payload, dtype=np.uint8)
+  image = cv2.imdecode(matrix, cv2.IMREAD_COLOR)
+  if image is None:
+    raise HTTPException(status_code=400, detail="Invalid image bytes")
+  return image
+
+
+def _normalize_embedding(embedding: np.ndarray | List[float]) -> List[float]:
+  vector = np.array(embedding, dtype=np.float32)
+  norm = float(np.linalg.norm(vector))
+  if math.isclose(norm, 0.0):
+    return vector.tolist()
+  return (vector / norm).tolist()
+
+
+def _get_analyzer(model_name: str):
+  global _ANALYZER
+  if _ANALYZER is not None:
+    return _ANALYZER
+
+  try:
+    from insightface.app import FaceAnalysis  # type: ignore
+  except Exception as error:
+    raise RuntimeError("insightface is required for real inference mode") from error
+
+  analyzer = FaceAnalysis(name=model_name, providers=["CPUExecutionProvider"])
+  analyzer.prepare(ctx_id=0, det_size=(640, 640))
+  _ANALYZER = analyzer
+  return _ANALYZER
+
+
+def detect_faces_real(
+  image_url: str,
+  model_name: str,
+  max_image_mb: int,
+) -> List[Tuple[int, int, int, int, float, List[float]]]:
+  payload = fetch_image_bytes(image_url, max_image_mb=max_image_mb)
+  image = decode_image_bytes(payload)
+  analyzer = _get_analyzer(model_name)
+
+  faces = analyzer.get(image)
+  detections: List[Tuple[int, int, int, int, float, List[float]]] = []
+  for face in faces:
+    bbox = getattr(face, "bbox", None)
+    if bbox is None or len(bbox) < 4:
+      continue
+
+    x1, y1, x2, y2 = [int(round(value)) for value in bbox[:4]]
+    width = max(1, x2 - x1)
+    height = max(1, y2 - y1)
+
+    raw_embedding = getattr(face, "normed_embedding", None)
+    if raw_embedding is None:
+      raw_embedding = getattr(face, "embedding", None)
+    if raw_embedding is None:
+      continue
+
+    quality = _to_quality(float(getattr(face, "det_score", 0.0)))
+    detections.append((x1, y1, width, height, quality, _normalize_embedding(raw_embedding)))
+
+  return detections
 
 
 def cosine_similarity(a: List[float], b: List[float]) -> float:
