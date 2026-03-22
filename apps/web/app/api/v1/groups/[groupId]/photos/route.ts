@@ -22,7 +22,10 @@ export async function GET(
 ) {
   try {
     const { groupId } = await context.params;
-    const userId = getRequestUserId(request);
+    const userId = await getRequestUserId(request);
+    if (!userId) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
     const isMember = await checkMembership(groupId, userId);
     if (!isMember) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -63,7 +66,10 @@ export async function POST(
 ) {
   try {
     const { groupId } = await context.params;
-    const userId = getRequestUserId(request);
+    const userId = await getRequestUserId(request);
+    if (!userId) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
     await ensureProfile(userId);
     const isMember = await checkMembership(groupId, userId);
     if (!isMember) {

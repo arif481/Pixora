@@ -5,7 +5,10 @@ import { getRequestUserId } from "@/lib/request-user";
 
 export async function GET(request: NextRequest) {
   try {
-    const userId = getRequestUserId(request);
+    const userId = await getRequestUserId(request);
+    if (!userId) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
     const supabase = createSupabaseServerClient();
     const { data, error } = await supabase
       .from("shares")

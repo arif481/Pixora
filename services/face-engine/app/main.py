@@ -1,4 +1,4 @@
-0988885efrt43import os
+import os
 from fastapi import FastAPI, Header, HTTPException
 
 from .engine import cosine_similarity, detect_faces_stub, stable_embedding

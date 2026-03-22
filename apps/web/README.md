@@ -16,12 +16,18 @@
 - Shared-with-me feed
 - Supabase-backed API routes under `app/api/v1/*`
 - Processing worker pipeline (`processing_jobs` -> detect -> match -> share/review)
+- JWT-based API user resolution from Supabase bearer token
 
 ## Next integration steps
 
-- Add authenticated user mapping from Supabase Auth JWT (`auth.uid()`).
+- Add actual sign-in UI and attach bearer token on all client API requests.
 - Add scheduled trigger (Vercel cron/GitHub Actions) to call `POST /api/v1/internal/process-next`.
 - Add confidence tuning and duplicate-face suppression strategies.
+
+## Auth behavior
+
+- Production mode expects `Authorization: Bearer <supabase_access_token>`.
+- Optional local fallback can be enabled with `ALLOW_DEMO_USER=true` (uses `x-user-id`/`DEMO_USER_ID`).
 
 ## Trigger worker manually
 

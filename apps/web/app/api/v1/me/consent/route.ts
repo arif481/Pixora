@@ -5,7 +5,10 @@ import { ensureProfile } from "@/lib/profile";
 
 export async function POST(request: NextRequest) {
   try {
-    const userId = getRequestUserId(request);
+    const userId = await getRequestUserId(request);
+    if (!userId) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
     await ensureProfile(userId);
     const body = await request.json();
 

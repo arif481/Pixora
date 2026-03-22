@@ -52,3 +52,10 @@ Configure these repository secrets in GitHub:
 - `INTERNAL_WORKER_TOKEN` (must match `apps/web/.env.example` value in your deployed app env)
 
 The workflow runs every minute and can also be triggered manually from GitHub Actions.
+
+## Deploy quickly
+
+- Generate exact env commands from your local secrets:
+	- `bash scripts/deploy_env_prep.sh`
+- Follow full deployment checklist:
+	- `docs/deploy-runbook.md`

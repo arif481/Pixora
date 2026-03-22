@@ -12,7 +12,10 @@ export async function POST(
 ) {
   try {
     const { groupId } = await context.params;
-    const userId = getRequestUserId(request);
+    const userId = await getRequestUserId(request);
+    if (!userId) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
     const body = await request.json();
 
     if (!body?.filename || typeof body.filename !== "string") {
