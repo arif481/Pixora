@@ -4,7 +4,6 @@
 
 - Confirm local env files exist:
   - `apps/web/.env.local`
-  - `services/face-engine/.env`
 - Generate exact deploy commands from current local values:
   - `bash scripts/deploy_env_prep.sh`
 
@@ -20,29 +19,18 @@
    - `vercel --prod`
 5. Save the deployed URL (example `https://pixora.vercel.app`).
 
-## 2) Deploy face-engine (Render/Railway)
-
-1. Create service from repo path `services/face-engine`.
-2. Start command:
-   - `bash run.sh`
-3. Set runtime env vars in service dashboard:
-   - `ENGINE_AUTH_TOKEN`
-   - `MODEL_NAME`
-   - `MAX_IMAGE_MB`
-4. Deploy and copy the public URL.
-
-## 3) Wire web -> face engine
+## 2) Wire web -> internal face engine
 
 In Vercel production env set:
 
-- `FACE_ENGINE_URL` = your deployed face-engine URL
-- `FACE_ENGINE_TOKEN` = same exact value as face-engine `ENGINE_AUTH_TOKEN`
+- `FACE_ENGINE_URL` = `https://<your-web-domain>/api/v1/internal/face-engine`
+- `FACE_ENGINE_TOKEN` = any strong secret string (used for internal service auth)
 
 Redeploy web after updating env vars:
 
 - `vercel --prod`
 
-## 4) GitHub cron worker
+## 3) GitHub cron worker
 
 Workflow file is already present:
 
@@ -58,7 +46,7 @@ Run once manually from GitHub Actions:
 - Workflow: **Process Worker Cron**
 - Action: **Run workflow**
 
-## 5) End-to-end production validation
+## 4) End-to-end production validation
 
 1. Open deployed web URL.
 2. Enroll face from `/enrollment`.
@@ -68,18 +56,18 @@ Run once manually from GitHub Actions:
    - `curl -X POST https://<web-domain>/api/v1/internal/process-next -H "Authorization: Bearer <INTERNAL_WORKER_TOKEN>"`
 6. Check `/shares` for results.
 
-## 6) If something fails
+## 5) If something fails
 
 - `401 Unauthorized` on process endpoint:
   - `INTERNAL_WORKER_TOKEN` mismatch between web env and caller/GitHub secret.
 - `Face engine enroll failed`:
-  - `FACE_ENGINE_TOKEN` and `ENGINE_AUTH_TOKEN` mismatch.
+  - `FACE_ENGINE_TOKEN` mismatch between caller and internal face-engine endpoint check.
 - Worker `Object not found`:
   - photo was registered but not actually uploaded via signed URL.
 - Worker keeps retrying old failed jobs:
   - clear stale failed rows in `processing_jobs` and related `photos` for test data.
 
-## 7) Production thresholds
+## 6) Production thresholds
 
 If local testing used aggressive values, reset in production:
 

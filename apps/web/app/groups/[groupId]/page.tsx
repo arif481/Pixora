@@ -3,32 +3,62 @@
 import { FormEvent, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { Photo } from "@/lib/types";
+import { apiFetch } from "@/lib/api-client";
 
 export default function GroupDetailPage() {
   const params = useParams<{ groupId: string }>();
   const [groupId, setGroupId] = useState<string>("");
   const [photos, setPhotos] = useState<Photo[]>([]);
-  const [filename, setFilename] = useState("group-photo.jpg");
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [error, setError] = useState("");
 
   async function loadPhotos(id: string) {
-    const response = await fetch(`/api/v1/groups/${id}/photos`);
+    const response = await apiFetch(`/api/v1/groups/${id}/photos`);
     const data = await response.json();
+    if (!response.ok) {
+      setError(data?.error ?? "Failed to load photos");
+      setPhotos([]);
+      return;
+    }
+
+    setError("");
     setPhotos(data.photos ?? []);
   }
 
   async function registerPhoto(event: FormEvent) {
     event.preventDefault();
-    if (!groupId) return;
+    if (!groupId || !selectedFile) return;
 
-    const uploadUrlResponse = await fetch(`/api/v1/groups/${groupId}/photos/upload-url`, {
+    const uploadUrlResponse = await apiFetch(`/api/v1/groups/${groupId}/photos/upload-url`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ filename, contentType: "image/jpeg", size: 123456 }),
+      body: JSON.stringify({
+        filename: selectedFile.name,
+        contentType: selectedFile.type || "application/octet-stream",
+        size: selectedFile.size,
+      }),
     });
 
     const uploadUrlData = await uploadUrlResponse.json();
+    if (!uploadUrlResponse.ok) {
+      setError(uploadUrlData?.error ?? "Failed to create upload URL");
+      return;
+    }
 
-    await fetch(`/api/v1/groups/${groupId}/photos`, {
+    const uploadResponse = await fetch(uploadUrlData.uploadUrl, {
+      method: "PUT",
+      headers: {
+        "content-type": selectedFile.type || "application/octet-stream",
+      },
+      body: selectedFile,
+    });
+
+    if (!uploadResponse.ok) {
+      setError("Failed to upload file to storage");
+      return;
+    }
+
+    const registerResponse = await apiFetch(`/api/v1/groups/${groupId}/photos`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -36,6 +66,14 @@ export default function GroupDetailPage() {
       }),
     });
 
+    if (!registerResponse.ok) {
+      const registerData = await registerResponse.json();
+      setError(registerData?.error ?? "Failed to register photo");
+      return;
+    }
+
+    setSelectedFile(null);
+    setError("");
     await loadPhotos(groupId);
   }
 
@@ -52,16 +90,17 @@ export default function GroupDetailPage() {
     <main>
       <div className="card">
         <h2 style={{ marginTop: 0 }}>Group Upload</h2>
+        {error ? <p style={{ color: "#e35d6a" }}>{error}</p> : null}
         <form className="row" onSubmit={registerPhoto}>
           <input
-            value={filename}
-            onChange={(event) => setFilename(event.target.value)}
-            placeholder="filename.jpg"
+            type="file"
+            accept="image/*"
+            onChange={(event) => setSelectedFile(event.target.files?.[0] ?? null)}
           />
-          <button type="submit">Register Upload</button>
+          <button type="submit" disabled={!selectedFile}>Upload & Register</button>
         </form>
         <p style={{ marginBottom: 0 }}>
-          This starter registers uploads and queues processing; wire real object upload next.
+          Select an image file to upload into storage and queue face processing.
         </p>
       </div>
 

@@ -3,14 +3,22 @@
 import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
 import { Group } from "@/lib/types";
+import { apiFetch } from "@/lib/api-client";
 
 export default function GroupsPage() {
   const [groups, setGroups] = useState<Group[]>([]);
   const [name, setName] = useState("");
+  const [error, setError] = useState("");
 
   async function loadGroups() {
-    const response = await fetch("/api/v1/groups");
+    const response = await apiFetch("/api/v1/groups");
     const data = await response.json();
+    if (!response.ok) {
+      setError(data?.error ?? "Failed to load groups");
+      setGroups([]);
+      return;
+    }
+    setError("");
     setGroups(data.groups ?? []);
   }
 
@@ -18,13 +26,20 @@ export default function GroupsPage() {
     event.preventDefault();
     if (!name.trim()) return;
 
-    await fetch("/api/v1/groups", {
+    const response = await apiFetch("/api/v1/groups", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ name }),
     });
 
+    if (!response.ok) {
+      const data = await response.json();
+      setError(data?.error ?? "Failed to create group");
+      return;
+    }
+
     setName("");
+    setError("");
     await loadGroups();
   }
 
@@ -36,6 +51,7 @@ export default function GroupsPage() {
     <main>
       <div className="card">
         <h2 style={{ marginTop: 0 }}>Your Groups</h2>
+        {error ? <p style={{ color: "#e35d6a" }}>{error}</p> : null}
         <form className="row" onSubmit={onSubmit}>
           <input
             value={name}

@@ -11,16 +11,16 @@
 ## Current scaffold status
 
 - Group creation/listing
-- Group photo registration flow
+- Group photo upload + registration flow
 - Enrollment UI with face-engine backed completion route
 - Shared-with-me feed
 - Supabase-backed API routes under `app/api/v1/*`
 - Processing worker pipeline (`processing_jobs` -> detect -> match -> share/review)
 - JWT-based API user resolution from Supabase bearer token
+- Client auth UI (email/password sign-in/sign-up) with bearer token forwarding on API requests
 
 ## Next integration steps
 
-- Add actual sign-in UI and attach bearer token on all client API requests.
 - Add scheduled trigger (Vercel cron/GitHub Actions) to call `POST /api/v1/internal/process-next`.
 - Add confidence tuning and duplicate-face suppression strategies.
 
