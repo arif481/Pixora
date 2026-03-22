@@ -5,7 +5,7 @@ export default function HomePage() {
         <h2 style={{ marginTop: 0 }}>Face-based Group Photo Sharing</h2>
         <p>
           Upload group photos, detect faces, and auto-share to matched members.
-          This starter includes the core pages and API contract stubs.
+          This app includes end-to-end enrollment, groups, uploads, processing, and sharing flows.
         </p>
       </div>
       <div className="card">

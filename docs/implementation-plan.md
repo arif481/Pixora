@@ -74,7 +74,7 @@
 - User can delete biometric and account data.
 - Alert dashboard shows match rejection trends.
 
-## Starter backlog (first 20 tickets)
+## Initial backlog (first 20 tickets)
 
 1. Setup Next.js + Supabase SDK
 2. Add auth guard middleware

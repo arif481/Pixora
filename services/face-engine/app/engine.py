@@ -22,7 +22,7 @@ def stable_embedding(seed_text: str) -> List[float]:
   return (vector / norm).tolist()
 
 
-def detect_faces_stub(image_url: str) -> List[Tuple[int, int, int, int, float, List[float]]]:
+def detect_faces_sim(image_url: str) -> List[Tuple[int, int, int, int, float, List[float]]]:
   base_embedding = stable_embedding(image_url)
   return [
     (120, 80, 190, 190, 0.93, base_embedding),

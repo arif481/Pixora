@@ -1,6 +1,6 @@
 # Face Engine Service (FastAPI)
 
-This is a runnable starter for face verification and matching endpoints.
+Runnable face verification and matching service.
 
 ## Run locally
 
@@ -20,6 +20,6 @@ This is a runnable starter for face verification and matching endpoints.
 
 ## Notes
 
-- Current implementation uses deterministic stub embeddings.
+- Current implementation uses deterministic simulation embeddings.
 - Swap in real `insightface` and `onnxruntime` inference in `app/engine.py`.
 - Keep response schema stable so web app integration does not break.

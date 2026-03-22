@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireEnv } from "@/lib/server-config";
-import { stableEmbedding } from "@/lib/face-engine-stub";
+import { stableDeterministicEmbedding } from "@/lib/face-engine-sim";
 
 function verifyToken(request: NextRequest) {
   const header = request.headers.get("authorization");
@@ -21,9 +21,9 @@ export async function POST(request: NextRequest) {
     }
 
     return NextResponse.json({
-      model_version: "stub-v1",
+      model_version: "sim-v1",
       quality_passed: true,
-      embedding: stableEmbedding(`enroll:${imageUrl}`),
+      embedding: stableDeterministicEmbedding(`enroll:${imageUrl}`),
       flags: [],
     });
   } catch (error) {

@@ -8,7 +8,7 @@
 3. Start dev server:
    - `npm run dev:web`
 
-## Current scaffold status
+## Current feature status
 
 - Group creation/listing
 - Group photo upload + registration flow

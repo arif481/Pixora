@@ -1,7 +1,7 @@
 import os
 from fastapi import FastAPI, Header, HTTPException
 
-from .engine import cosine_similarity, detect_faces_stub, stable_embedding
+from .engine import cosine_similarity, detect_faces_sim, stable_embedding
 from .schemas import (
     DetectEmbedRequest,
     DetectEmbedResponse,
@@ -15,7 +15,7 @@ from .schemas import (
 
 app = FastAPI(title="Pixora Face Engine", version="0.1.0")
 
-MODEL_VERSION = os.getenv("MODEL_NAME", "stub-v1")
+MODEL_VERSION = os.getenv("MODEL_NAME", "sim-v1")
 ENGINE_AUTH_TOKEN = os.getenv("ENGINE_AUTH_TOKEN", "change-me")
 
 
@@ -51,7 +51,7 @@ def detect_and_embed(
 ) -> DetectEmbedResponse:
     verify_token(authorization)
     faces = []
-    for x, y, w, h, quality, embedding in detect_faces_stub(payload.image_url):
+    for x, y, w, h, quality, embedding in detect_faces_sim(payload.image_url):
         faces.append(
             FaceEmbedding(
                 bbox=FaceBox(x=x, y=y, w=w, h=h),

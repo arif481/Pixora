@@ -4,11 +4,11 @@ Privacy-first group photo sharing powered by face verification and face matching
 
 ## Repo structure
 
-- `apps/web` — Next.js web app + API route stubs for MVP flows
-- `services/face-engine` — FastAPI face engine starter (stub inference)
+- `apps/web` — Next.js web app + API routes for core product flows
+- `services/face-engine` — FastAPI face engine service (deterministic simulation inference)
 - `db` — PostgreSQL schema, RLS, and seed data for Supabase
 - `docs` — architecture, product spec, API spec, deployment, implementation plan
-- `openapi/openapi.yaml` — API contract starter
+- `openapi/openapi.yaml` — API contract
 
 ## Run locally
 
@@ -27,7 +27,7 @@ Privacy-first group photo sharing powered by face verification and face matching
 4. Copy `.env.example` to `.env`
 5. `bash run.sh`
 
-## MVP scaffolding included
+## MVP features included
 
 - Face enrollment flow with consent check and face-engine integration
 - Group create/list UI backed by Supabase

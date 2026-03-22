@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireEnv } from "@/lib/server-config";
-import { detectFacesStub } from "@/lib/face-engine-stub";
+import { detectFacesSimulated } from "@/lib/face-engine-sim";
 
 function verifyToken(request: NextRequest) {
   const header = request.headers.get("authorization");
@@ -20,8 +20,8 @@ export async function POST(request: NextRequest) {
     }
 
     return NextResponse.json({
-      model_version: "stub-v1",
-      faces: detectFacesStub(body.image_url),
+      model_version: "sim-v1",
+      faces: detectFacesSimulated(body.image_url),
     });
   } catch (error) {
     return NextResponse.json(

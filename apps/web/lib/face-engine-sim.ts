@@ -31,7 +31,7 @@ function normalize(vector: number[]): number[] {
   return vector.map((item) => item / scale);
 }
 
-export function stableEmbedding(seedText: string): number[] {
+export function stableDeterministicEmbedding(seedText: string): number[] {
   const rng = mulberry32(seedFromText(seedText));
   const vector: number[] = [];
 
@@ -42,12 +42,12 @@ export function stableEmbedding(seedText: string): number[] {
   return normalize(vector);
 }
 
-export function detectFacesStub(imageUrl: string) {
+export function detectFacesSimulated(imageUrl: string) {
   return [
     {
       bbox: { x: 120, y: 80, w: 190, h: 190 },
       quality_score: 0.93,
-      embedding: stableEmbedding(imageUrl),
+      embedding: stableDeterministicEmbedding(imageUrl),
     },
   ];
 }
