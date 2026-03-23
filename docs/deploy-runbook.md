@@ -24,11 +24,12 @@
 Use external real inference service:
 
 1. Deploy `services/face-engine` to a Python host (Render/Railway/Fly/etc).
-2. Set service env vars:
+2. Ensure Python version is `3.10.x` or `3.11.x` (for Render, set `PYTHON_VERSION=3.10.14` if needed).
+3. Set service env vars:
   - `ENGINE_MODE=real`
   - `MODEL_NAME=buffalo_l`
   - `ENGINE_AUTH_TOKEN=<strong-secret>`
-3. In web production env set:
+4. In web production env set:
   - `FACE_ENGINE_URL=https://<face-engine-domain>`
   - `FACE_ENGINE_TOKEN=<same ENGINE_AUTH_TOKEN>`
 
