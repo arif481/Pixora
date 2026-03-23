@@ -26,11 +26,16 @@ def _detect_faces(image_url: str):
     if ENGINE_MODE not in {"real", "production", "insightface"}:
         raise RuntimeError("ENGINE_MODE must be set to 'real'")
 
-    return detect_faces_real(
-        image_url=image_url,
-        model_name=MODEL_VERSION,
-        max_image_mb=MAX_IMAGE_MB,
-    ), "real"
+    try:
+        return detect_faces_real(
+            image_url=image_url,
+            model_name=MODEL_VERSION,
+            max_image_mb=MAX_IMAGE_MB,
+        ), "real"
+    except HTTPException:
+        raise
+    except Exception as error:
+        raise HTTPException(status_code=503, detail=f"Face detection failed: {error}") from error
 
 
 def verify_token(authorization: str | None) -> None:

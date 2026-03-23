@@ -2,16 +2,31 @@ from __future__ import annotations
 
 import hashlib
 import math
+import os
 from typing import List, Optional, Tuple
 
+import certifi
 import httpx
 import numpy as np
 from fastapi import HTTPException
 
 EMBEDDING_SIZE = 512
-REQUEST_TIMEOUT_SECONDS = 20
+REQUEST_TIMEOUT_SECONDS = int(os.getenv("IMAGE_FETCH_TIMEOUT_SECONDS", "30"))
+INSIGHTFACE_CTX_ID = int(os.getenv("INSIGHTFACE_CTX_ID", "-1"))
 
 _ANALYZER = None
+
+
+def _http_client() -> httpx.Client:
+  return httpx.Client(
+    timeout=REQUEST_TIMEOUT_SECONDS,
+    follow_redirects=True,
+    verify=certifi.where(),
+    headers={
+      "User-Agent": "PixoraFaceEngine/1.0",
+      "Accept": "image/*,*/*;q=0.8",
+    },
+  )
 
 
 def _to_quality(score: float) -> float:
@@ -35,8 +50,9 @@ def stable_embedding(seed_text: str) -> List[float]:
 def fetch_image_bytes(image_url: str, max_image_mb: int) -> bytes:
   max_size = max_image_mb * 1024 * 1024
   try:
-    response = httpx.get(image_url, timeout=REQUEST_TIMEOUT_SECONDS, follow_redirects=True)
-    response.raise_for_status()
+    with _http_client() as client:
+      response = client.get(image_url)
+      response.raise_for_status()
   except Exception as error:
     raise HTTPException(status_code=400, detail=f"Failed to fetch image: {error}") from error
 
@@ -83,7 +99,7 @@ def _get_analyzer(model_name: str):
     raise RuntimeError("insightface is required for real inference mode") from error
 
   analyzer = FaceAnalysis(name=model_name, providers=["CPUExecutionProvider"])
-  analyzer.prepare(ctx_id=0, det_size=(640, 640))
+  analyzer.prepare(ctx_id=INSIGHTFACE_CTX_ID, det_size=(640, 640))
   _ANALYZER = analyzer
   return _ANALYZER
 
@@ -95,9 +111,15 @@ def detect_faces_real(
 ) -> List[Tuple[int, int, int, int, float, List[float]]]:
   payload = fetch_image_bytes(image_url, max_image_mb=max_image_mb)
   image = decode_image_bytes(payload)
-  analyzer = _get_analyzer(model_name)
+  try:
+    analyzer = _get_analyzer(model_name)
+  except Exception as error:
+    raise HTTPException(status_code=503, detail=f"Face model initialization failed: {error}") from error
 
-  faces = analyzer.get(image)
+  try:
+    faces = analyzer.get(image)
+  except Exception as error:
+    raise HTTPException(status_code=503, detail=f"Face inference failed: {error}") from error
   detections: List[Tuple[int, int, int, int, float, List[float]]] = []
   for face in faces:
     bbox = getattr(face, "bbox", None)
