@@ -3,6 +3,7 @@ import { createSupabaseServerClient } from "@/lib/supabase-server";
 import { getRequestUserId } from "@/lib/request-user";
 import { ensureProfile } from "@/lib/profile";
 import { vectorLiteral } from "@/lib/embeddings";
+import { requireFaceVerification } from "@/lib/face-verification";
 
 type PrecomputedFacePayload = {
   bboxX: number;
@@ -49,6 +50,10 @@ export async function GET(
     if (!userId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+    const verification = await requireFaceVerification(userId);
+    if (!verification.ok) {
+      return NextResponse.json({ error: verification.error }, { status: verification.status });
+    }
     const isMember = await checkMembership(groupId, userId);
     if (!isMember) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -92,6 +97,10 @@ export async function POST(
     const userId = await getRequestUserId(request);
     if (!userId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    const verification = await requireFaceVerification(userId);
+    if (!verification.ok) {
+      return NextResponse.json({ error: verification.error }, { status: verification.status });
     }
     await ensureProfile(userId);
     const isMember = await checkMembership(groupId, userId);

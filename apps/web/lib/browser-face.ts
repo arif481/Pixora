@@ -10,6 +10,12 @@ export type BrowserFace = {
   };
   qualityScore: number;
   embedding: number[];
+  liveness: {
+    blink: number;
+    smile: number;
+    mouthOpen: number;
+    yaw: number;
+  };
 };
 
 const EMBEDDING_SIZE = 512;
@@ -115,6 +121,33 @@ function computeBox(
   return { x, y, w, h };
 }
 
+function getBlendshapeScore(
+  blendshapes: Array<{ categoryName: string; score: number }>,
+  categoryName: string
+) {
+  const found = blendshapes.find((shape) => shape.categoryName === categoryName);
+  return clamp(found?.score ?? 0, 0, 1);
+}
+
+function estimateYaw(landmarks: Array<{ x: number; y: number }>) {
+  const leftEye = landmarks[33];
+  const rightEye = landmarks[263];
+  const noseTip = landmarks[1];
+
+  if (!leftEye || !rightEye || !noseTip) {
+    return 0;
+  }
+
+  const midEyeX = (leftEye.x + rightEye.x) / 2;
+  const eyeDistance = Math.abs(rightEye.x - leftEye.x);
+  if (eyeDistance < 0.0001) {
+    return 0;
+  }
+
+  const yaw = (noseTip.x - midEyeX) / eyeDistance;
+  return clamp(yaw, -1, 1);
+}
+
 async function createImageFromFile(file: File) {
   const objectUrl = URL.createObjectURL(file);
 
@@ -177,6 +210,33 @@ export async function detectBrowserFaces(file: File): Promise<BrowserFace[]> {
         landmarks as Array<{ x: number; y: number; z: number }>,
         blendshapeCategories as Array<{ categoryName: string; score: number }>
       ),
+      liveness: {
+        blink: Math.max(
+          getBlendshapeScore(
+            blendshapeCategories as Array<{ categoryName: string; score: number }>,
+            "eyeBlinkLeft"
+          ),
+          getBlendshapeScore(
+            blendshapeCategories as Array<{ categoryName: string; score: number }>,
+            "eyeBlinkRight"
+          )
+        ),
+        smile:
+          (getBlendshapeScore(
+            blendshapeCategories as Array<{ categoryName: string; score: number }>,
+            "mouthSmileLeft"
+          ) +
+            getBlendshapeScore(
+              blendshapeCategories as Array<{ categoryName: string; score: number }>,
+              "mouthSmileRight"
+            )) /
+          2,
+        mouthOpen: getBlendshapeScore(
+          blendshapeCategories as Array<{ categoryName: string; score: number }>,
+          "jawOpen"
+        ),
+        yaw: estimateYaw(landmarks as Array<{ x: number; y: number }>),
+      },
     });
   }
 

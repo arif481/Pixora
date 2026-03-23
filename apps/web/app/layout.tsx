@@ -1,6 +1,7 @@
 import "./globals.css";
 import Link from "next/link";
 import { AuthStatus } from "@/app/components/auth-status";
+import { FaceVerificationGate } from "@/app/components/face-verification-gate";
 
 export const metadata = {
   title: "Pixora",
@@ -27,6 +28,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <AuthStatus />
             </div>
           </header>
+          <FaceVerificationGate />
           {children}
         </div>
       </body>

@@ -4,8 +4,53 @@ import { getRequestUserId } from "@/lib/request-user";
 import { createSupabaseServerClient } from "@/lib/supabase-server";
 import { BROWSER_FACE_MODEL_VERSION } from "@/lib/face-model";
 import { ensureProfile } from "@/lib/profile";
+import { backfillSharesForUser } from "@/lib/share-backfill";
 
 const MIN_ENROLL_QUALITY = Number(process.env.MIN_ENROLL_QUALITY ?? 0.5);
+
+function normalizeEmbedding(input: unknown) {
+  if (!Array.isArray(input)) {
+    return null;
+  }
+
+  const values = input.map((value) => Number(value));
+  if (values.length !== 512 || values.some((value) => !Number.isFinite(value))) {
+    return null;
+  }
+
+  return values;
+}
+
+function mergeEmbeddings(embeddings: number[][]) {
+  const merged = new Array<number>(512).fill(0);
+
+  for (const embedding of embeddings) {
+    for (let index = 0; index < 512; index += 1) {
+      merged[index] += embedding[index];
+    }
+  }
+
+  const count = embeddings.length;
+  for (let index = 0; index < 512; index += 1) {
+    merged[index] /= count;
+  }
+
+  let squared = 0;
+  for (const value of merged) {
+    squared += value * value;
+  }
+
+  if (squared === 0) {
+    return merged;
+  }
+
+  const norm = Math.sqrt(squared);
+  for (let index = 0; index < 512; index += 1) {
+    merged[index] /= norm;
+  }
+
+  return merged;
+}
 
 function vectorLiteral(values: number[]) {
   return `[${values.join(",")}]`;
@@ -44,13 +89,20 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Biometric consent required" }, { status: 400 });
     }
 
-    const embedding = body.embedding
-      .map((value: unknown) => Number(value))
-      .filter((value: number) => Number.isFinite(value));
+    const singleEmbedding = normalizeEmbedding(body.embedding);
+    const multiEmbeddings = Array.isArray(body.embeddings)
+      ? body.embeddings
+          .map((embedding: unknown) => normalizeEmbedding(embedding))
+          .filter((embedding: number[] | null): embedding is number[] => Boolean(embedding))
+      : [];
 
-    if (embedding.length !== 512) {
-      return NextResponse.json({ error: "embedding must contain 512 numbers" }, { status: 400 });
+    const embeddingCandidates = multiEmbeddings.length > 0 ? multiEmbeddings : singleEmbedding ? [singleEmbedding] : [];
+
+    if (embeddingCandidates.length === 0) {
+      return NextResponse.json({ error: "embedding (or embeddings) must contain 512 numbers" }, { status: 400 });
     }
+
+    const embedding = mergeEmbeddings(embeddingCandidates);
 
     const qualityScore = Number(body.qualityScore ?? 0);
     const qualityPassed = Number.isFinite(qualityScore) && qualityScore >= MIN_ENROLL_QUALITY;
@@ -92,6 +144,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const backfill = await backfillSharesForUser(userId);
+
     return NextResponse.json({
       status: "enrolled",
       modelVersion:
@@ -99,6 +153,7 @@ export async function POST(request: NextRequest) {
           ? body.modelVersion
           : BROWSER_FACE_MODEL_VERSION,
       templateId: template.id,
+      backfill,
     });
   } catch (error) {
     return NextResponse.json(

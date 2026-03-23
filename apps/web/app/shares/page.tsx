@@ -7,6 +7,7 @@ import { apiFetch } from "@/lib/api-client";
 export default function SharesPage() {
   const [shares, setShares] = useState<Share[]>([]);
   const [error, setError] = useState("");
+  const [deletingShareId, setDeletingShareId] = useState<string | null>(null);
 
   useEffect(() => {
     async function loadShares() {
@@ -24,6 +25,29 @@ export default function SharesPage() {
 
     void loadShares();
   }, []);
+
+  async function removeShare(shareId: string) {
+    setDeletingShareId(shareId);
+
+    try {
+      const response = await apiFetch(`/api/v1/shares/${shareId}`, {
+        method: "DELETE",
+      });
+
+      if (!response.ok) {
+        const data = await response.json();
+        setError(data?.error ?? "Failed to remove share");
+        return;
+      }
+
+      setError("");
+      setShares((current) => current.filter((share) => share.id !== shareId));
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Failed to remove share");
+    } finally {
+      setDeletingShareId(null);
+    }
+  }
 
   return (
     <main>
@@ -46,6 +70,15 @@ export default function SharesPage() {
           <p><strong>Share:</strong> {share.id}</p>
           <p><strong>Photo:</strong> {share.photoId}</p>
           <p><strong>Status:</strong> {share.status}</p>
+          <div className="row">
+            <button
+              type="button"
+              onClick={() => void removeShare(share.id)}
+              disabled={deletingShareId === share.id}
+            >
+              {deletingShareId === share.id ? "Removing..." : "Remove Access"}
+            </button>
+          </div>
         </div>
       ))}
     </main>

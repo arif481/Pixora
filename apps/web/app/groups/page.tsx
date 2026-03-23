@@ -2,13 +2,17 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Group } from "@/lib/types";
 import { apiFetch } from "@/lib/api-client";
 
 export default function GroupsPage() {
+  const router = useRouter();
   const [groups, setGroups] = useState<Group[]>([]);
   const [name, setName] = useState("");
+  const [joinGroupId, setJoinGroupId] = useState("");
   const [error, setError] = useState("");
+  const [isOpeningPersonal, setIsOpeningPersonal] = useState(false);
 
   async function loadGroups() {
     const response = await apiFetch("/api/v1/groups");
@@ -43,6 +47,52 @@ export default function GroupsPage() {
     await loadGroups();
   }
 
+  async function joinGroup(event: FormEvent) {
+    event.preventDefault();
+    if (!joinGroupId.trim()) {
+      return;
+    }
+
+    const response = await apiFetch("/api/v1/groups/join", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ groupId: joinGroupId.trim() }),
+    });
+
+    if (!response.ok) {
+      const data = await response.json();
+      setError(data?.error ?? "Failed to join group");
+      return;
+    }
+
+    setJoinGroupId("");
+    setError("");
+    await loadGroups();
+  }
+
+  async function openPersonalGroup() {
+    setIsOpeningPersonal(true);
+    setError("");
+
+    try {
+      const response = await apiFetch("/api/v1/groups/personal", {
+        method: "POST",
+      });
+      const data = await response.json();
+
+      if (!response.ok || !data?.group?.id) {
+        setError(data?.error ?? "Failed to open personal space");
+        return;
+      }
+
+      router.push(`/groups/${data.group.id}`);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Failed to open personal space");
+    } finally {
+      setIsOpeningPersonal(false);
+    }
+  }
+
   useEffect(() => {
     void loadGroups();
   }, []);
@@ -52,6 +102,11 @@ export default function GroupsPage() {
       <div className="card">
         <h2>Your Groups</h2>
         {error ? <p className="status-error">{error}</p> : null}
+        <div className="row" style={{ marginBottom: 10 }}>
+          <button type="button" onClick={() => void openPersonalGroup()} disabled={isOpeningPersonal}>
+            {isOpeningPersonal ? "Opening..." : "Quick Upload (Personal Space)"}
+          </button>
+        </div>
         <form className="row" onSubmit={onSubmit}>
           <input
             value={name}
@@ -59,6 +114,14 @@ export default function GroupsPage() {
             placeholder="New group name"
           />
           <button className="btn-primary" type="submit">Create Group</button>
+        </form>
+        <form className="row" onSubmit={joinGroup}>
+          <input
+            value={joinGroupId}
+            onChange={(event) => setJoinGroupId(event.target.value)}
+            placeholder="Join with Group ID"
+          />
+          <button type="submit">Join Group</button>
         </form>
       </div>
 

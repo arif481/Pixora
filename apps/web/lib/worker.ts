@@ -13,10 +13,6 @@ type PhotoRecord = {
   group_id: string;
 };
 
-type GroupMember = {
-  user_id: string;
-};
-
 type FaceTemplate = {
   user_id: string;
   embedding: unknown;
@@ -136,32 +132,16 @@ export async function processNextJob(): Promise<WorkerResult> {
 
     const faces = (precomputedFaces ?? []) as PrecomputedPhotoFace[];
 
-    const { data: members, error: memberError } = await supabase
-      .from("group_members")
-      .select("user_id")
-      .eq("group_id", photoRecord.group_id)
-      .eq("status", "active");
+    const { data: templates, error: templateError } = await supabase
+      .from("face_templates")
+      .select("user_id, embedding")
+      .eq("is_primary", true);
 
-    if (memberError) {
-      throw new Error(memberError.message);
+    if (templateError) {
+      throw new Error(templateError.message);
     }
 
-    const memberIds = ((members ?? []) as GroupMember[]).map((member) => member.user_id);
-
-    let templateRows: FaceTemplate[] = [];
-    if (memberIds.length > 0) {
-      const { data: templates, error: templateError } = await supabase
-        .from("face_templates")
-        .select("user_id, embedding")
-        .in("user_id", memberIds)
-        .eq("is_primary", true);
-
-      if (templateError) {
-        throw new Error(templateError.message);
-      }
-
-      templateRows = (templates ?? []) as FaceTemplate[];
-    }
+    const templateRows = (templates ?? []) as FaceTemplate[];
 
     const candidateTemplates = templateRows
       .map((row) => ({ userId: row.user_id, embedding: parseVector(row.embedding) }))

@@ -13,6 +13,7 @@ export default function GroupDetailPage() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [error, setError] = useState("");
   const [isUploading, setIsUploading] = useState(false);
+  const [deletingPhotoId, setDeletingPhotoId] = useState<string | null>(null);
 
   async function loadPhotos(id: string) {
     const response = await apiFetch(`/api/v1/groups/${id}/photos`);
@@ -25,6 +26,37 @@ export default function GroupDetailPage() {
 
     setError("");
     setPhotos(data.photos ?? []);
+  }
+
+  async function deletePhoto(photoId: string) {
+    if (!groupId) {
+      return;
+    }
+
+    const confirmed = window.confirm("Delete this photo and its associated shares?");
+    if (!confirmed) {
+      return;
+    }
+
+    setDeletingPhotoId(photoId);
+    try {
+      const response = await apiFetch(`/api/v1/groups/${groupId}/photos/${photoId}`, {
+        method: "DELETE",
+      });
+
+      if (!response.ok) {
+        const data = await response.json();
+        setError(data?.error ?? "Failed to delete photo");
+        return;
+      }
+
+      setError("");
+      await loadPhotos(groupId);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Failed to delete photo");
+    } finally {
+      setDeletingPhotoId(null);
+    }
   }
 
   async function registerPhoto(event: FormEvent) {
@@ -137,6 +169,15 @@ export default function GroupDetailPage() {
           <p><strong>Photo:</strong> {photo.id}</p>
           <p><strong>Status:</strong> {photo.status}</p>
           <p><strong>Key:</strong> {photo.storageKey}</p>
+          <div className="row">
+            <button
+              type="button"
+              onClick={() => void deletePhoto(photo.id)}
+              disabled={deletingPhotoId === photo.id}
+            >
+              {deletingPhotoId === photo.id ? "Deleting..." : "Delete Photo"}
+            </button>
+          </div>
         </div>
       ))}
     </main>

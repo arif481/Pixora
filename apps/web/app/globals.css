@@ -232,3 +232,20 @@ input::placeholder {
   border-color: var(--accent);
   color: #fff;
 }
+
+.verify-camera-shell {
+  width: min(100%, 420px);
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  overflow: hidden;
+  background: var(--bg-soft);
+  margin-bottom: 10px;
+}
+
+.verify-video {
+  display: block;
+  width: 100%;
+  min-height: 240px;
+  object-fit: cover;
+  background: #000;
+}

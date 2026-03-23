@@ -2,12 +2,17 @@ import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase-server";
 import { NextRequest } from "next/server";
 import { getRequestUserId } from "@/lib/request-user";
+import { requireFaceVerification } from "@/lib/face-verification";
 
 export async function GET(request: NextRequest) {
   try {
     const userId = await getRequestUserId(request);
     if (!userId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    const verification = await requireFaceVerification(userId);
+    if (!verification.ok) {
+      return NextResponse.json({ error: verification.error }, { status: verification.status });
     }
     const supabase = createSupabaseServerClient();
     const { data, error } = await supabase

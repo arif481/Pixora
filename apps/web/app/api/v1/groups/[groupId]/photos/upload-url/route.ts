@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase-server";
 import { getRequestUserId } from "@/lib/request-user";
+import { requireFaceVerification } from "@/lib/face-verification";
 
 function sanitizeFilename(filename: string) {
   return filename.replace(/[^a-zA-Z0-9._-]/g, "_");
@@ -15,6 +16,10 @@ export async function POST(
     const userId = await getRequestUserId(request);
     if (!userId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    const verification = await requireFaceVerification(userId);
+    if (!verification.ok) {
+      return NextResponse.json({ error: verification.error }, { status: verification.status });
     }
     const body = await request.json();
 

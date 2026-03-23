@@ -3,6 +3,8 @@ import { NextRequest } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase-server";
 import { getRequestUserId } from "@/lib/request-user";
 import { ensureProfile } from "@/lib/profile";
+import { getFaceVerificationState } from "@/lib/face-verification";
+import { requireFaceVerification } from "@/lib/face-verification";
 
 export async function GET(request: NextRequest) {
   try {
@@ -10,6 +12,12 @@ export async function GET(request: NextRequest) {
     if (!userId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+
+    const verificationGate = await requireFaceVerification(userId);
+    if (!verificationGate.ok) {
+      return NextResponse.json({ error: verificationGate.error }, { status: verificationGate.status });
+    }
+
     await ensureProfile(userId);
 
     const supabase = createSupabaseServerClient();
@@ -30,11 +38,14 @@ export async function GET(request: NextRequest) {
       .eq("is_primary", true)
       .maybeSingle();
 
+    const verification = await getFaceVerificationState(userId);
+
     return NextResponse.json({
       user: {
         id: profile.id,
         username: profile.username,
         enrollmentStatus: template ? "enrolled" : "not_enrolled",
+        verification,
       },
     });
   } catch (error) {
