@@ -5,7 +5,7 @@ Privacy-first group photo sharing powered by face verification and face matching
 ## Repo structure
 
 - `apps/web` — Next.js web app + API routes for core product flows
-- `services/face-engine` — FastAPI face engine service (deterministic simulation inference)
+- `services/face-engine` — FastAPI face engine service (real inference via InsightFace/ONNX Runtime)
 - `db` — PostgreSQL schema, RLS, and seed data for Supabase
 - `docs` — architecture, product spec, API spec, deployment, implementation plan
 - `openapi/openapi.yaml` — API contract
