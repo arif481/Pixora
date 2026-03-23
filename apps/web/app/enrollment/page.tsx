@@ -92,20 +92,26 @@ export default function EnrollmentPage() {
   return (
     <main>
       <div className="card">
-        <h2 style={{ marginTop: 0 }}>Face Verification Enrollment</h2>
-        <p>This verifies identity for automatic face-based sharing using on-device face analysis.</p>
+        <h2>Face Verification Enrollment</h2>
+        <p className="muted">This verifies identity for automatic face-based sharing using on-device face analysis.</p>
         <form className="row" onSubmit={startEnrollment}>
           <input
             type="file"
             accept="image/*"
             onChange={(event) => setSelectedFile(event.target.files?.[0] ?? null)}
           />
-          <button type="submit" disabled={!selectedFile || isSubmitting}>
+          <button className="btn-primary" type="submit" disabled={!selectedFile || isSubmitting}>
             {isSubmitting ? "Processing..." : "Enroll Face"}
           </button>
         </form>
-        {sessionId ? <p><strong>Session:</strong> {sessionId}</p> : null}
-        {result ? <p><strong>Result:</strong> {result}</p> : null}
+        {sessionId ? (
+          <p>
+            <strong>Session:</strong> {sessionId}
+          </p>
+        ) : null}
+        {result ? (
+          <p className={result.toLowerCase().includes("fail") ? "status-error" : "status-success"}>{result}</p>
+        ) : null}
       </div>
     </main>
   );

@@ -109,22 +109,28 @@ export default function GroupDetailPage() {
   return (
     <main>
       <div className="card">
-        <h2 style={{ marginTop: 0 }}>Group Upload</h2>
-        {error ? <p style={{ color: "#e35d6a" }}>{error}</p> : null}
+        <h2>Group Upload</h2>
+        {error ? <p className="status-error">{error}</p> : null}
         <form className="row" onSubmit={registerPhoto}>
           <input
             type="file"
             accept="image/*"
             onChange={(event) => setSelectedFile(event.target.files?.[0] ?? null)}
           />
-          <button type="submit" disabled={!selectedFile || isUploading}>
+          <button className="btn-primary" type="submit" disabled={!selectedFile || isUploading}>
             {isUploading ? "Processing..." : "Upload & Register"}
           </button>
         </form>
-        <p style={{ marginBottom: 0 }}>
+        <p className="muted" style={{ marginBottom: 0 }}>
           Select an image file to upload into storage. Face features are extracted on-device.
         </p>
       </div>
+
+      {photos.length === 0 ? (
+        <div className="card">
+          <p className="muted" style={{ margin: 0 }}>No photos yet in this group.</p>
+        </div>
+      ) : null}
 
       {photos.map((photo) => (
         <div className="card" key={photo.id}>

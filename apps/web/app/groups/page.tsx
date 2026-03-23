@@ -50,22 +50,30 @@ export default function GroupsPage() {
   return (
     <main>
       <div className="card">
-        <h2 style={{ marginTop: 0 }}>Your Groups</h2>
-        {error ? <p style={{ color: "#e35d6a" }}>{error}</p> : null}
+        <h2>Your Groups</h2>
+        {error ? <p className="status-error">{error}</p> : null}
         <form className="row" onSubmit={onSubmit}>
           <input
             value={name}
             onChange={(event) => setName(event.target.value)}
             placeholder="New group name"
           />
-          <button type="submit">Create Group</button>
+          <button className="btn-primary" type="submit">Create Group</button>
         </form>
       </div>
 
+      {groups.length === 0 ? (
+        <div className="card">
+          <p className="muted" style={{ margin: 0 }}>
+            No groups yet. Create your first group to start uploading photos.
+          </p>
+        </div>
+      ) : null}
+
       {groups.map((group) => (
         <div className="card" key={group.id}>
-          <h3 style={{ marginTop: 0 }}>{group.name}</h3>
-          <Link href={`/groups/${group.id}`}>Open Group</Link>
+          <h3>{group.name}</h3>
+          <Link className="nav-link" href={`/groups/${group.id}`}>Open Group</Link>
         </div>
       ))}
     </main>

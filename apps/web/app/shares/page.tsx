@@ -28,10 +28,19 @@ export default function SharesPage() {
   return (
     <main>
       <div className="card">
-        <h2 style={{ marginTop: 0 }}>Shared With Me</h2>
-        <p>Photos auto-shared based on face matching appear here.</p>
-        {error ? <p style={{ color: "#e35d6a" }}>{error}</p> : null}
+        <h2>Shared With Me</h2>
+        <p className="muted">Photos auto-shared based on face matching appear here.</p>
+        {error ? <p className="status-error">{error}</p> : null}
       </div>
+
+      {shares.length === 0 ? (
+        <div className="card">
+          <p className="muted" style={{ margin: 0 }}>
+            Nothing shared yet. Upload photos in a group and run processing.
+          </p>
+        </div>
+      ) : null}
+
       {shares.map((share) => (
         <div className="card" key={share.id}>
           <p><strong>Share:</strong> {share.id}</p>
