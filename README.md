@@ -39,7 +39,7 @@ Workflow file: `.github/workflows/process-worker-cron.yml`
 
 Configure these repository secrets in GitHub:
 
-- `PIXORA_BASE_URL` (canonical: `https://pixora-teal-two.vercel.app`)
+- `PIXORA_BASE_URL` (set this to your active web deployment URL)
 - `INTERNAL_WORKER_TOKEN` (must match `apps/web/.env.example` value in your deployed app env)
 
 The workflow runs every minute and can also be triggered manually from GitHub Actions.
