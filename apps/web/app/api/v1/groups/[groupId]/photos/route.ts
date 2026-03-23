@@ -2,6 +2,29 @@ import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase-server";
 import { getRequestUserId } from "@/lib/request-user";
 import { ensureProfile } from "@/lib/profile";
+import { vectorLiteral } from "@/lib/embeddings";
+
+type PrecomputedFacePayload = {
+  bboxX: number;
+  bboxY: number;
+  bboxW: number;
+  bboxH: number;
+  qualityScore?: number;
+  embedding: number[];
+};
+
+function normalizeEmbedding(input: unknown) {
+  if (!Array.isArray(input)) {
+    return null;
+  }
+
+  const values = input.map((value) => Number(value));
+  if (values.length !== 512 || values.some((value) => !Number.isFinite(value))) {
+    return null;
+  }
+
+  return values;
+}
 
 async function checkMembership(groupId: string, userId: string) {
   const supabase = createSupabaseServerClient();
@@ -82,6 +105,10 @@ export async function POST(
       return NextResponse.json({ error: "storageKey is required" }, { status: 400 });
     }
 
+    const precomputedFaces: PrecomputedFacePayload[] = Array.isArray(body?.precomputedFaces)
+      ? body.precomputedFaces
+      : [];
+
     const supabase = createSupabaseServerClient();
     const { data: insertedPhoto, error: insertPhotoError } = await supabase
       .from("photos")
@@ -100,6 +127,37 @@ export async function POST(
         { error: insertPhotoError?.message ?? "Failed to register photo" },
         { status: 500 }
       );
+    }
+
+    if (precomputedFaces.length > 0) {
+      const rows = precomputedFaces
+        .map((face) => {
+          const embedding = normalizeEmbedding(face.embedding);
+          if (!embedding) {
+            return null;
+          }
+
+          return {
+            photo_id: insertedPhoto.id,
+            bbox_x: Math.max(0, Math.round(Number(face.bboxX ?? 0))),
+            bbox_y: Math.max(0, Math.round(Number(face.bboxY ?? 0))),
+            bbox_w: Math.max(1, Math.round(Number(face.bboxW ?? 1))),
+            bbox_h: Math.max(1, Math.round(Number(face.bboxH ?? 1))),
+            quality_score:
+              typeof face.qualityScore === "number" && Number.isFinite(face.qualityScore)
+                ? face.qualityScore
+                : null,
+            embedding: vectorLiteral(embedding),
+          };
+        })
+        .filter((face): face is NonNullable<typeof face> => Boolean(face));
+
+      if (rows.length > 0) {
+        const { error: insertFacesError } = await supabase.from("photo_faces").insert(rows);
+        if (insertFacesError) {
+          return NextResponse.json({ error: insertFacesError.message }, { status: 500 });
+        }
+      }
     }
 
     const { error: jobError } = await supabase.from("processing_jobs").upsert(

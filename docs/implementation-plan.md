@@ -29,7 +29,7 @@
 ### Tasks
 - Build consent UI and API.
 - Build enrollment session flow.
-- Integrate face engine `/enroll` endpoint.
+- Integrate browser-side embedding extraction on enrollment page.
 - Store template embedding in `face_templates`.
 
 ### Acceptance criteria
@@ -40,8 +40,8 @@
 
 ### Tasks
 - Worker pulls queued jobs.
-- Fetch image via signed URL and call `/detect-and-embed`.
-- Insert `photo_faces` rows.
+- Compute and send `precomputedFaces` from browser upload flow.
+- Validate and persist `photo_faces` rows in registration API.
 - Compare each face against active group members.
 - Write `face_matches` decisions by confidence bucket.
 
@@ -87,10 +87,10 @@
 9. Register photo metadata endpoint
 10. Add `processing_jobs` enqueue logic
 11. Create worker process loop
-12. Deploy FastAPI face engine skeleton
-13. Add `/enroll` integration
+12. Add browser embedding utility (`@mediapipe/tasks-vision`)
+13. Add enrollment embedding integration
 14. Add consent capture page + backend
-15. Add `/detect-and-embed` integration
+15. Add `precomputedFaces` upload/registration integration
 16. Implement cosine similarity matcher
 17. Add auto-share decision service
 18. Build review queue UI

@@ -2,15 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { consumeEnrollmentSession } from "@/lib/enrollment-session";
 import { getRequestUserId } from "@/lib/request-user";
 import { createSupabaseServerClient } from "@/lib/supabase-server";
-import { requireEnv } from "@/lib/server-config";
+import { BROWSER_FACE_MODEL_VERSION } from "@/lib/face-model";
 import { ensureProfile } from "@/lib/profile";
 
-type EngineEnrollResponse = {
-  model_version: string;
-  quality_passed: boolean;
-  embedding?: number[];
-  flags?: string[];
-};
+const MIN_ENROLL_QUALITY = Number(process.env.MIN_ENROLL_QUALITY ?? 0.5);
 
 function vectorLiteral(values: number[]) {
   return `[${values.join(",")}]`;
@@ -24,8 +19,11 @@ export async function POST(request: NextRequest) {
     }
     await ensureProfile(userId);
     const body = await request.json();
-    if (!body?.sessionId || !body?.imageUrl) {
-      return NextResponse.json({ error: "sessionId and imageUrl are required" }, { status: 400 });
+    if (!body?.sessionId || !Array.isArray(body?.embedding)) {
+      return NextResponse.json(
+        { error: "sessionId and embedding are required" },
+        { status: 400 }
+      );
     }
 
     if (!consumeEnrollmentSession(body.sessionId, userId)) {
@@ -46,28 +44,23 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Biometric consent required" }, { status: 400 });
     }
 
-    const faceEngineUrl = requireEnv("FACE_ENGINE_URL");
-    const faceEngineToken = requireEnv("FACE_ENGINE_TOKEN");
-    const enrollUrl = `${faceEngineUrl.replace(/\/$/, "")}/enroll?image_url=${encodeURIComponent(body.imageUrl)}`;
-    const enrollResponse = await fetch(enrollUrl, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${faceEngineToken}`,
-      },
-    });
+    const embedding = body.embedding
+      .map((value: unknown) => Number(value))
+      .filter((value: number) => Number.isFinite(value));
 
-    if (!enrollResponse.ok) {
-      const errorText = await enrollResponse.text();
-      return NextResponse.json(
-        { error: `Face engine enroll failed: ${errorText}` },
-        { status: 502 }
-      );
+    if (embedding.length !== 512) {
+      return NextResponse.json({ error: "embedding must contain 512 numbers" }, { status: 400 });
     }
 
-    const enrollment = (await enrollResponse.json()) as EngineEnrollResponse;
-    if (!enrollment.quality_passed || !enrollment.embedding?.length) {
+    const qualityScore = Number(body.qualityScore ?? 0);
+    const qualityPassed = Number.isFinite(qualityScore) && qualityScore >= MIN_ENROLL_QUALITY;
+
+    if (!qualityPassed) {
       return NextResponse.json(
-        { error: "Enrollment quality check failed", flags: enrollment.flags ?? [] },
+        {
+          error: "Enrollment quality check failed",
+          flags: Array.isArray(body.flags) ? body.flags : ["low-face-quality"],
+        },
         { status: 400 }
       );
     }
@@ -82,8 +75,11 @@ export async function POST(request: NextRequest) {
       .from("face_templates")
       .insert({
         user_id: userId,
-        embedding: vectorLiteral(enrollment.embedding),
-        model_version: enrollment.model_version,
+        embedding: vectorLiteral(embedding),
+        model_version:
+          typeof body.modelVersion === "string" && body.modelVersion.length > 0
+            ? body.modelVersion
+            : BROWSER_FACE_MODEL_VERSION,
         is_primary: true,
       })
       .select("id")
@@ -98,7 +94,10 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       status: "enrolled",
-      modelVersion: enrollment.model_version,
+      modelVersion:
+        typeof body.modelVersion === "string" && body.modelVersion.length > 0
+          ? body.modelVersion
+          : BROWSER_FACE_MODEL_VERSION,
       templateId: template.id,
     });
   } catch (error) {

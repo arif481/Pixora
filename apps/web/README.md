@@ -12,10 +12,10 @@
 
 - Group creation/listing
 - Group photo upload + registration flow
-- Enrollment UI with face-engine backed completion route
+- Enrollment UI with on-device face embedding
 - Shared-with-me feed
 - Supabase-backed API routes under `app/api/v1/*`
-- Processing worker pipeline (`processing_jobs` -> detect -> match -> share/review)
+- Processing worker pipeline (`processing_jobs` -> match -> share/review)
 - JWT-based API user resolution from Supabase bearer token
 - Client auth UI (email/password sign-in/sign-up) with bearer token forwarding on API requests
 
@@ -24,9 +24,9 @@
 - Add scheduled trigger (Vercel cron/GitHub Actions) to call `POST /api/v1/internal/process-next`.
 - Add confidence tuning and duplicate-face suppression strategies.
 
-## Face engine deployment modes
+## Face processing mode
 
-- External real inference is required: deploy `services/face-engine` with `ENGINE_MODE=real`, then set `FACE_ENGINE_URL` to that service URL.
+- Default mode is browser-side embedding (`@mediapipe/tasks-vision`) with no external inference service required.
 
 ## Auth behavior
 

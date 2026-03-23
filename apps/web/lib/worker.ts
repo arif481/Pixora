@@ -1,6 +1,6 @@
 import { createSupabaseServerClient } from "@/lib/supabase-server";
-import { cosineSimilarity, parseVector, vectorLiteral } from "@/lib/embeddings";
-import { getThresholds, requireEnv } from "@/lib/server-config";
+import { cosineSimilarity, parseVector } from "@/lib/embeddings";
+import { getThresholds } from "@/lib/server-config";
 
 type ProcessingJob = {
   id: string;
@@ -11,7 +11,6 @@ type ProcessingJob = {
 type PhotoRecord = {
   id: string;
   group_id: string;
-  storage_key: string;
 };
 
 type GroupMember = {
@@ -23,20 +22,14 @@ type FaceTemplate = {
   embedding: unknown;
 };
 
-type DetectFace = {
-  bbox: {
-    x: number;
-    y: number;
-    w: number;
-    h: number;
-  };
-  quality_score: number;
-  embedding: number[];
-};
-
-type DetectAndEmbedResponse = {
-  model_version: string;
-  faces: DetectFace[];
+type PrecomputedPhotoFace = {
+  id: string;
+  bbox_x: number;
+  bbox_y: number;
+  bbox_w: number;
+  bbox_h: number;
+  quality_score: number | null;
+  embedding: unknown;
 };
 
 type WorkerResult = {
@@ -121,7 +114,7 @@ export async function processNextJob(): Promise<WorkerResult> {
   try {
     const { data: photo, error: photoError } = await supabase
       .from("photos")
-      .select("id, group_id, storage_key")
+      .select("id, group_id")
       .eq("id", claimed.photo_id)
       .single();
 
@@ -132,31 +125,16 @@ export async function processNextJob(): Promise<WorkerResult> {
     const photoRecord = photo as PhotoRecord;
     await supabase.from("photos").update({ status: "processing" }).eq("id", photoRecord.id);
 
-    const { data: signedUrlData, error: signedError } = await supabase.storage
-      .from("photos-private")
-      .createSignedUrl(photoRecord.storage_key, 120);
+    const { data: precomputedFaces, error: precomputedFacesError } = await supabase
+      .from("photo_faces")
+      .select("id, bbox_x, bbox_y, bbox_w, bbox_h, quality_score, embedding")
+      .eq("photo_id", photoRecord.id);
 
-    if (signedError || !signedUrlData?.signedUrl) {
-      throw new Error(signedError?.message ?? "Failed to create signed read URL");
+    if (precomputedFacesError) {
+      throw new Error(precomputedFacesError.message);
     }
 
-    const faceEngineUrl = requireEnv("FACE_ENGINE_URL").replace(/\/$/, "");
-    const faceEngineToken = requireEnv("FACE_ENGINE_TOKEN");
-
-    const detectResponse = await fetch(`${faceEngineUrl}/detect-and-embed`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        Authorization: `Bearer ${faceEngineToken}`,
-      },
-      body: JSON.stringify({ image_url: signedUrlData.signedUrl }),
-    });
-
-    if (!detectResponse.ok) {
-      throw new Error(`Face engine detect failed (${detectResponse.status})`);
-    }
-
-    const detectPayload = (await detectResponse.json()) as DetectAndEmbedResponse;
+    const faces = (precomputedFaces ?? []) as PrecomputedPhotoFace[];
 
     const { data: members, error: memberError } = await supabase
       .from("group_members")
@@ -193,26 +171,13 @@ export async function processNextJob(): Promise<WorkerResult> {
     let sharesCreated = 0;
     let reviewCreated = 0;
 
-    for (const face of detectPayload.faces ?? []) {
-      const { data: insertedFace, error: faceInsertError } = await supabase
-        .from("photo_faces")
-        .insert({
-          photo_id: photoRecord.id,
-          bbox_x: face.bbox.x,
-          bbox_y: face.bbox.y,
-          bbox_w: face.bbox.w,
-          bbox_h: face.bbox.h,
-          quality_score: face.quality_score,
-          embedding: vectorLiteral(face.embedding),
-        })
-        .select("id")
-        .single();
-
-      if (faceInsertError || !insertedFace) {
-        throw new Error(faceInsertError?.message ?? "Failed to insert photo face");
+    for (const face of faces) {
+      const faceEmbedding = parseVector(face.embedding);
+      if (faceEmbedding.length !== 512) {
+        continue;
       }
 
-      const best = bestMatch(face.embedding, candidateTemplates);
+      const best = bestMatch(faceEmbedding, candidateTemplates);
       if (!best) {
         continue;
       }
@@ -222,18 +187,21 @@ export async function processNextJob(): Promise<WorkerResult> {
       }
 
       const decision = best.score >= autoShare ? "auto_shared" : "pending_review";
-      const { data: insertedMatch, error: matchError } = await supabase
+      const { data: upsertedMatch, error: matchError } = await supabase
         .from("face_matches")
-        .insert({
-          photo_face_id: insertedFace.id,
-          user_id: best.userId,
-          confidence: Number(best.score.toFixed(5)),
-          decision,
-        })
+        .upsert(
+          {
+            photo_face_id: face.id,
+            user_id: best.userId,
+            confidence: Number(best.score.toFixed(5)),
+            decision,
+          },
+          { onConflict: "photo_face_id,user_id" }
+        )
         .select("id")
         .single();
 
-      if (matchError || !insertedMatch) {
+      if (matchError || !upsertedMatch) {
         throw new Error(matchError?.message ?? "Failed to insert face match");
       }
 
@@ -244,7 +212,7 @@ export async function processNextJob(): Promise<WorkerResult> {
           {
             photo_id: photoRecord.id,
             recipient_user_id: best.userId,
-            source_match_id: insertedMatch.id,
+            source_match_id: upsertedMatch.id,
             status: "active",
           },
           { onConflict: "photo_id,recipient_user_id" }
@@ -257,7 +225,7 @@ export async function processNextJob(): Promise<WorkerResult> {
         sharesCreated += 1;
       } else {
         const { error: reviewError } = await supabase.from("review_queue").insert({
-          match_id: insertedMatch.id,
+          match_id: upsertedMatch.id,
           state: "open",
         });
 
@@ -277,7 +245,7 @@ export async function processNextJob(): Promise<WorkerResult> {
       entity_type: "photo",
       entity_id: photoRecord.id,
       metadata: {
-        facesDetected: detectPayload.faces?.length ?? 0,
+        facesDetected: faces.length,
         matchesCreated,
         sharesCreated,
         reviewCreated,
@@ -288,7 +256,7 @@ export async function processNextJob(): Promise<WorkerResult> {
       status: "processed",
       jobId: claimed.id,
       photoId: photoRecord.id,
-      facesDetected: detectPayload.faces?.length ?? 0,
+      facesDetected: faces.length,
       matchesCreated,
       sharesCreated,
       reviewCreated,

@@ -5,7 +5,6 @@ Privacy-first group photo sharing powered by face verification and face matching
 ## Repo structure
 
 - `apps/web` — Next.js web app + API routes for core product flows
-- `services/face-engine` — FastAPI face engine service (real inference via InsightFace/ONNX Runtime)
 - `db` — PostgreSQL schema, RLS, and seed data for Supabase
 - `docs` — architecture, product spec, API spec, deployment, implementation plan
 - `openapi/openapi.yaml` — API contract
@@ -19,17 +18,9 @@ Privacy-first group photo sharing powered by face verification and face matching
 3. `npm install`
 4. `npm run dev`
 
-### 2) Face engine
-
-1. `cd services/face-engine`
-2. Create and activate a virtual environment
-3. `pip install -r requirements.txt`
-4. Copy `.env.example` to `.env`
-5. `bash run.sh`
-
 ## MVP features included
 
-- Face enrollment flow with consent check and face-engine integration
+- Face enrollment flow with consent check and browser-side face embedding
 - Group create/list UI backed by Supabase
 - Group photo upload-url + registration flow backed by Supabase
 - Shares feed backed by Supabase
@@ -48,7 +39,7 @@ Workflow file: `.github/workflows/process-worker-cron.yml`
 
 Configure these repository secrets in GitHub:
 
-- `PIXORA_BASE_URL` (example: `https://your-app.vercel.app`)
+- `PIXORA_BASE_URL` (canonical: `https://pixora-teal-two.vercel.app`)
 - `INTERNAL_WORKER_TOKEN` (must match `apps/web/.env.example` value in your deployed app env)
 
 The workflow runs every minute and can also be triggered manually from GitHub Actions.
