@@ -13,6 +13,7 @@ from fastapi import HTTPException
 EMBEDDING_SIZE = 512
 REQUEST_TIMEOUT_SECONDS = int(os.getenv("IMAGE_FETCH_TIMEOUT_SECONDS", "30"))
 INSIGHTFACE_CTX_ID = int(os.getenv("INSIGHTFACE_CTX_ID", "-1"))
+DETECTION_SIZE = int(os.getenv("INSIGHTFACE_DET_SIZE", "320"))
 
 _ANALYZER = None
 
@@ -98,8 +99,12 @@ def _get_analyzer(model_name: str):
   except Exception as error:
     raise RuntimeError("insightface is required for real inference mode") from error
 
-  analyzer = FaceAnalysis(name=model_name, providers=["CPUExecutionProvider"])
-  analyzer.prepare(ctx_id=INSIGHTFACE_CTX_ID, det_size=(640, 640))
+  analyzer = FaceAnalysis(
+    name=model_name,
+    allowed_modules=["detection", "recognition"],
+    providers=["CPUExecutionProvider"],
+  )
+  analyzer.prepare(ctx_id=INSIGHTFACE_CTX_ID, det_size=(DETECTION_SIZE, DETECTION_SIZE))
   _ANALYZER = analyzer
   return _ANALYZER
 
