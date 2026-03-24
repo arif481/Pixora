@@ -215,21 +215,66 @@ function createGeometricEmbedding(
 
 /* ─── Quality & bounding box ─── */
 
-function getPresenceQuality(
-  landmarks: Array<{ visibility?: number; presence?: number }> = []
-) {
-  const values = landmarks
-    .map((point) =>
-      typeof point.visibility === "number" ? point.visibility : point.presence
-    )
-    .filter(
-      (value): value is number =>
-        typeof value === "number" && Number.isFinite(value)
-    );
+/**
+ * Compute face quality from structural signals rather than MediaPipe's
+ * visibility/presence values (which are near-zero for face landmarks).
+ *
+ * Signals used:
+ *  - Face size relative to image (larger = better)
+ *  - Landmark spread (faces that fill the detection area = better)
+ *  - Facial symmetry (frontal faces = better)
+ *  - Landmark count (more detected = better)
+ */
+function computeQualityScore(
+  landmarks: Array<{ x: number; y: number; z: number }>,
+  imageWidth: number,
+  imageHeight: number
+): number {
+  if (landmarks.length < 100) return 0.1;
 
-  if (values.length === 0) return 0.8;
-  const average = values.reduce((sum, v) => sum + v, 0) / values.length;
-  return clamp(average, 0, 1);
+  // 1. Landmark count score (expect 468+)
+  const countScore = clamp(landmarks.length / 468, 0, 1);
+
+  // 2. Face size relative to image
+  let minX = 1, minY = 1, maxX = 0, maxY = 0;
+  for (const p of landmarks) {
+    minX = Math.min(minX, p.x);
+    minY = Math.min(minY, p.y);
+    maxX = Math.max(maxX, p.x);
+    maxY = Math.max(maxY, p.y);
+  }
+  const faceW = maxX - minX;
+  const faceH = maxY - minY;
+  const faceArea = faceW * faceH;
+  // A face covering ~5-50% of the image is ideal
+  const sizeScore = clamp(faceArea / 0.15, 0, 1);
+
+  // 3. Symmetry score (how centered is nose between eyes)
+  const leftEye = landmarks[LEFT_EYE_OUTER];
+  const rightEye = landmarks[RIGHT_EYE_OUTER];
+  const nose = landmarks[NOSE_TIP];
+  let symmetryScore = 0.8;
+  if (leftEye && rightEye && nose) {
+    const midX = (leftEye.x + rightEye.x) / 2;
+    const eyeDist = Math.abs(rightEye.x - leftEye.x);
+    if (eyeDist > 0.001) {
+      const asymmetry = Math.abs(nose.x - midX) / eyeDist;
+      symmetryScore = clamp(1 - asymmetry * 2, 0, 1);
+    }
+  }
+
+  // 4. Face proportions check (aspect ratio sanity)
+  const aspectRatio = faceH > 0 ? faceW / faceH : 0;
+  const proportionScore = (aspectRatio > 0.5 && aspectRatio < 1.5) ? 1.0 : 0.5;
+
+  // Weighted combination
+  const quality =
+    countScore * 0.2 +
+    sizeScore * 0.35 +
+    symmetryScore * 0.3 +
+    proportionScore * 0.15;
+
+  return clamp(quality, 0, 1);
 }
 
 function computeBox(
@@ -337,8 +382,10 @@ export async function detectBrowserFaces(file: File): Promise<BrowserFace[]> {
 
     const blendshapeCategories = (blendshapesPerFace[index]?.categories ??
       []) as Array<{ categoryName: string; score: number }>;
-    const qualityScore = getPresenceQuality(
-      landmarks as Array<{ visibility?: number; presence?: number }>
+    const qualityScore = computeQualityScore(
+      landmarks as Array<{ x: number; y: number; z: number }>,
+      image.naturalWidth,
+      image.naturalHeight
     );
 
     faces.push({
