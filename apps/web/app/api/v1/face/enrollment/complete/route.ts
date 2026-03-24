@@ -71,7 +71,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (!consumeEnrollmentSession(body.sessionId, userId)) {
+    if (!(await consumeEnrollmentSession(body.sessionId, userId))) {
       return NextResponse.json({ error: "Invalid or expired enrollment session" }, { status: 400 });
     }
 

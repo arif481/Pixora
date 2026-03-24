@@ -12,12 +12,17 @@ export async function GET(request: NextRequest) {
     }
     const verification = await requireFaceVerification(userId);
     if (!verification.ok) {
-      return NextResponse.json({ error: verification.error }, { status: verification.status });
+      return NextResponse.json(
+        { error: verification.error },
+        { status: verification.status }
+      );
     }
     const supabase = createSupabaseServerClient();
     const { data, error } = await supabase
       .from("shares")
-      .select("id, photo_id, recipient_user_id, status, created_at")
+      .select(
+        "id, photo_id, recipient_user_id, status, created_at, photos(storage_key, group_id)"
+      )
       .eq("recipient_user_id", userId)
       .neq("status", "deleted")
       .order("created_at", { ascending: false });
@@ -26,13 +31,20 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    const shares = (data ?? []).map((share) => ({
-      id: share.id,
-      photoId: share.photo_id,
-      recipientUserId: share.recipient_user_id,
-      status: share.status,
-      createdAt: share.created_at,
-    }));
+    const shares = (data ?? []).map((share) => {
+      const photo = Array.isArray(share.photos)
+        ? share.photos[0]
+        : share.photos;
+      return {
+        id: share.id,
+        photoId: share.photo_id,
+        recipientUserId: share.recipient_user_id,
+        status: share.status,
+        createdAt: share.created_at,
+        storageKey: photo?.storage_key ?? null,
+        groupId: photo?.group_id ?? null,
+      };
+    });
 
     return NextResponse.json({ shares });
   } catch (error) {

@@ -17,12 +17,9 @@ export function AuthStatus() {
 
   useEffect(() => {
     const supabase = getSupabaseBrowserClient();
-
     supabase.auth
       .getUser()
-      .then(({ data }) => {
-        setUserEmail(data.user?.email ?? null);
-      })
+      .then(({ data }) => setUserEmail(data.user?.email ?? null))
       .finally(() => setLoading(false));
 
     const {
@@ -30,23 +27,23 @@ export function AuthStatus() {
     } = supabase.auth.onAuthStateChange((_event, session) => {
       setUserEmail(session?.user?.email ?? null);
     });
-
-    return () => {
-      subscription.unsubscribe();
-    };
+    return () => subscription.unsubscribe();
   }, []);
 
-  async function handleAuth(event: FormEvent, mode: AuthMode) {
+  async function handleAuth(event: FormEvent, authMode: AuthMode) {
     event.preventDefault();
     setError("");
     setMessage("");
     setSubmitting(true);
 
     const supabase = getSupabaseBrowserClient();
-    if (mode === "signin") {
-      const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
-      if (signInError) {
-        setError(signInError.message);
+    if (authMode === "signin") {
+      const { error: err } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+      if (err) {
+        setError(err.message);
         setSubmitting(false);
         return;
       }
@@ -55,14 +52,13 @@ export function AuthStatus() {
       return;
     }
 
-    const { error: signUpError } = await supabase.auth.signUp({ email, password });
-    if (signUpError) {
-      setError(signUpError.message);
+    const { error: err } = await supabase.auth.signUp({ email, password });
+    if (err) {
+      setError(err.message);
       setSubmitting(false);
       return;
     }
-
-    setMessage("Sign-up complete. If email confirmation is enabled, verify your inbox before signing in.");
+    setMessage("Account created! Check your email to verify.");
     setSubmitting(false);
   }
 
@@ -70,33 +66,45 @@ export function AuthStatus() {
     setError("");
     setMessage("");
     const supabase = getSupabaseBrowserClient();
-    const { error: signOutError } = await supabase.auth.signOut();
-    if (signOutError) {
-      setError(signOutError.message);
+    const { error: err } = await supabase.auth.signOut();
+    if (err) {
+      setError(err.message);
       return;
     }
     setMessage("Signed out.");
   }
 
   if (loading) {
-    return <p className="muted" style={{ margin: 0 }}>Checking auth...</p>;
+    return (
+      <div className="auth-shell" style={{ padding: "8px 0" }}>
+        <p className="dim text-sm" style={{ margin: 0 }}>
+          <span className="spinner" style={{ width: 14, height: 14, marginRight: 8, verticalAlign: "middle" }} />
+          Checking auth…
+        </p>
+      </div>
+    );
   }
 
   if (userEmail) {
     return (
-      <div className="card auth-shell" style={{ marginBottom: 0 }}>
+      <div className="auth-shell">
         <div className="auth-user">
-          <span className="auth-email">Signed in: {userEmail}</span>
-          <button type="button" onClick={signOut}>Sign Out</button>
+          <span className="auth-email">
+            <span style={{ fontSize: 14 }}>👤</span>
+            {userEmail}
+          </span>
+          <button className="btn-sm btn-danger" type="button" onClick={signOut}>
+            Sign Out
+          </button>
         </div>
-        {message ? <p className="status-success">{message}</p> : null}
-        {error ? <p className="status-error">{error}</p> : null}
+        {message && <p className="status-success" style={{ marginTop: 8, fontSize: 12, padding: "6px 10px" }}>{message}</p>}
+        {error && <p className="status-error" style={{ marginTop: 8, fontSize: 12, padding: "6px 10px" }}>{error}</p>}
       </div>
     );
   }
 
   return (
-    <div className="card auth-shell" style={{ marginBottom: 0 }}>
+    <div className="auth-shell">
       <div className="auth-tabs">
         <button
           className={mode === "signin" ? "active" : ""}
@@ -113,33 +121,39 @@ export function AuthStatus() {
           Sign Up
         </button>
       </div>
-      <form className="form-row" onSubmit={(event) => void handleAuth(event, mode)}>
+      <form
+        className="form-row"
+        onSubmit={(e) => void handleAuth(e, mode)}
+        style={{ gap: 8 }}
+      >
         <input
           type="email"
           placeholder="Email"
           value={email}
-          onChange={(event) => setEmail(event.target.value)}
+          onChange={(e) => setEmail(e.target.value)}
           required
+          style={{ fontSize: 13, padding: "10px 12px" }}
         />
         <input
           type="password"
           placeholder="Password"
           value={password}
-          onChange={(event) => setPassword(event.target.value)}
+          onChange={(e) => setPassword(e.target.value)}
           required
+          style={{ fontSize: 13, padding: "10px 12px" }}
         />
-        <button className="btn-primary" type="submit" disabled={submitting}>
+        <button className="btn-primary" type="submit" disabled={submitting} style={{ fontSize: 13 }}>
           {submitting
             ? mode === "signin"
-              ? "Signing in..."
-              : "Creating account..."
+              ? "Signing in…"
+              : "Creating…"
             : mode === "signin"
               ? "Sign In"
               : "Create Account"}
         </button>
       </form>
-      {error ? <p className="status-error">{error}</p> : null}
-      {message ? <p className="status-success">{message}</p> : null}
+      {error && <p className="status-error" style={{ marginTop: 8, fontSize: 12, padding: "6px 10px" }}>{error}</p>}
+      {message && <p className="status-success" style={{ marginTop: 8, fontSize: 12, padding: "6px 10px" }}>{message}</p>}
     </div>
   );
 }

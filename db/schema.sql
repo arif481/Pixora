@@ -122,6 +122,13 @@ create table if not exists audit_logs (
   created_at timestamptz not null default now()
 );
 
+create table if not exists enrollment_sessions (
+  id text primary key,
+  user_id uuid not null references profiles(id) on delete cascade,
+  expires_at timestamptz not null,
+  created_at timestamptz not null default now()
+);
+
 create index if not exists idx_face_templates_embedding on face_templates using ivfflat (embedding vector_cosine_ops) with (lists = 100);
 create index if not exists idx_photo_faces_embedding on photo_faces using ivfflat (embedding vector_cosine_ops) with (lists = 100);
 create index if not exists idx_photos_group_created on photos(group_id, created_at desc);
