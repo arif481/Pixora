@@ -328,20 +328,57 @@ function estimateYaw(landmarks: Array<{ x: number; y: number }>) {
 
 /* ─── Image loading ─── */
 
+const MAX_IMAGE_DIM = 1920;
+
+/**
+ * Load a File into an HTMLImageElement suitable for MediaPipe.
+ *
+ * Drawing through createImageBitmap + canvas:
+ * 1. Normalizes EXIF orientation (phone photos)
+ * 2. Caps oversized images to avoid WebGL texture limits
+ * 3. Ensures pixel data is fully decoded before detection
+ */
 async function createImageFromFile(file: File) {
-  const objectUrl = URL.createObjectURL(file);
+  const bitmap = await createImageBitmap(file);
+
+  let { width, height } = bitmap;
+
+  // Scale down oversized images
+  if (width > MAX_IMAGE_DIM || height > MAX_IMAGE_DIM) {
+    const scale = MAX_IMAGE_DIM / Math.max(width, height);
+    width = Math.round(width * scale);
+    height = Math.round(height * scale);
+  }
+
+  // Draw through canvas to normalize orientation + pixel data
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Failed to create canvas context");
+  ctx.drawImage(bitmap, 0, 0, width, height);
+  bitmap.close();
+
+  // Convert back to HTMLImageElement for MediaPipe
+  const blob = await new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob(
+      (b) => (b ? resolve(b) : reject(new Error("Canvas toBlob failed"))),
+      "image/jpeg",
+      0.92
+    );
+  });
+  const url = URL.createObjectURL(blob);
 
   try {
     const image = await new Promise<HTMLImageElement>((resolve, reject) => {
-      const nextImage = new Image();
-      nextImage.crossOrigin = "anonymous";
-      nextImage.onload = () => resolve(nextImage);
-      nextImage.onerror = () => reject(new Error("Failed to load image"));
-      nextImage.src = objectUrl;
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error("Failed to load processed image"));
+      img.src = url;
     });
     return image;
   } finally {
-    URL.revokeObjectURL(objectUrl);
+    URL.revokeObjectURL(url);
   }
 }
 
