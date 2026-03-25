@@ -1,17 +1,28 @@
 import { createSupabaseServerClient } from "@/lib/supabase-server";
 
-export function createEnrollmentSession(userId: string, ttlSeconds = 600) {
+export async function createEnrollmentSession(userId: string, ttlSeconds = 1800) {
   const sessionId = crypto.randomUUID();
   const supabase = createSupabaseServerClient();
 
   const expiresAt = new Date(Date.now() + ttlSeconds * 1000).toISOString();
 
-  // Fire-and-forget insert — if it fails the session simply won't be found later
-  void supabase.from("enrollment_sessions").insert({
+  // Clean up any stale sessions for this user first
+  await supabase
+    .from("enrollment_sessions")
+    .delete()
+    .eq("user_id", userId)
+    .lt("expires_at", new Date().toISOString());
+
+  // Await the insert — this MUST complete before we return the session ID
+  const { error } = await supabase.from("enrollment_sessions").insert({
     id: sessionId,
     user_id: userId,
     expires_at: expiresAt,
   });
+
+  if (error) {
+    throw new Error(`Failed to create enrollment session: ${error.message}`);
+  }
 
   return { sessionId, expiresInSeconds: ttlSeconds };
 }

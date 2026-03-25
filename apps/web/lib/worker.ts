@@ -2,6 +2,11 @@ import { createSupabaseServerClient } from "@/lib/supabase-server";
 import { cosineSimilarity, parseVector } from "@/lib/embeddings";
 import { getThresholds } from "@/lib/server-config";
 
+const MAX_FACES_PER_JOB = Number(process.env.MAX_FACES_PER_JOB ?? 40);
+const MAX_JOB_ATTEMPTS = 5;
+const RETRY_BASE_SECONDS = 300;
+const RETRY_MAX_SECONDS = 3600;
+
 type ProcessingJob = {
   id: string;
   photo_id: string;
@@ -16,6 +21,10 @@ type PhotoRecord = {
 type FaceTemplate = {
   user_id: string;
   embedding: unknown;
+};
+
+type GroupMember = {
+  user_id: string;
 };
 
 type PrecomputedPhotoFace = {
@@ -64,7 +73,7 @@ async function claimNextJob() {
     .from("processing_jobs")
     .select("id, photo_id, attempts")
     .in("status", ["queued", "failed"])
-    .lt("attempts", 5)
+    .lt("attempts", MAX_JOB_ATTEMPTS)
     .order("scheduled_at", { ascending: true })
     .limit(1);
 
@@ -81,6 +90,8 @@ async function claimNextJob() {
     .from("processing_jobs")
     .update({ status: "running", attempts: job.attempts + 1, last_error: null })
     .eq("id", job.id)
+    .eq("attempts", job.attempts)
+    .in("status", ["queued", "failed"])
     .select("id, photo_id, attempts")
     .single();
 
@@ -91,9 +102,24 @@ async function claimNextJob() {
   return updated as ProcessingJob;
 }
 
-async function failJob(jobId: string, photoId: string, message: string) {
+function getRetryDelaySeconds(attempts: number) {
+  const exponent = Math.max(0, attempts - 1);
+  const delay = RETRY_BASE_SECONDS * 2 ** exponent;
+  return Math.min(RETRY_MAX_SECONDS, delay);
+}
+
+async function failJob(jobId: string, photoId: string, message: string, attempts: number) {
   const supabase = createSupabaseServerClient();
-  await supabase.from("processing_jobs").update({ status: "failed", last_error: message }).eq("id", jobId);
+  const delaySeconds = getRetryDelaySeconds(attempts);
+  const nextRunAt = new Date(Date.now() + delaySeconds * 1000).toISOString();
+  await supabase
+    .from("processing_jobs")
+    .update({
+      status: "failed",
+      last_error: message,
+      scheduled_at: nextRunAt,
+    })
+    .eq("id", jobId);
   await supabase.from("photos").update({ status: "failed" }).eq("id", photoId);
 }
 
@@ -130,11 +156,57 @@ export async function processNextJob(): Promise<WorkerResult> {
       throw new Error(precomputedFacesError.message);
     }
 
-    const faces = (precomputedFaces ?? []) as PrecomputedPhotoFace[];
+    const faceRows = (precomputedFaces ?? []) as PrecomputedPhotoFace[];
+    const faceLimit = Number.isFinite(MAX_FACES_PER_JOB)
+      ? Math.max(1, Math.floor(MAX_FACES_PER_JOB))
+      : 40;
+    const faces = faceRows.slice(0, faceLimit);
+
+    if (faces.length === 0) {
+      await supabase.from("photos").update({ status: "processed" }).eq("id", photoRecord.id);
+      await supabase.from("processing_jobs").update({ status: "done", last_error: null }).eq("id", claimed.id);
+
+      return {
+        status: "processed",
+        jobId: claimed.id,
+        photoId: photoRecord.id,
+        facesDetected: 0,
+        matchesCreated: 0,
+        sharesCreated: 0,
+        reviewCreated: 0,
+      };
+    }
+
+    const { data: members, error: membersError } = await supabase
+      .from("group_members")
+      .select("user_id")
+      .eq("group_id", photoRecord.group_id)
+      .eq("status", "active");
+
+    if (membersError) {
+      throw new Error(membersError.message);
+    }
+
+    const memberIds = ((members ?? []) as GroupMember[]).map((member) => member.user_id);
+    if (memberIds.length === 0) {
+      await supabase.from("photos").update({ status: "processed" }).eq("id", photoRecord.id);
+      await supabase.from("processing_jobs").update({ status: "done", last_error: null }).eq("id", claimed.id);
+
+      return {
+        status: "processed",
+        jobId: claimed.id,
+        photoId: photoRecord.id,
+        facesDetected: faces.length,
+        matchesCreated: 0,
+        sharesCreated: 0,
+        reviewCreated: 0,
+      };
+    }
 
     const { data: templates, error: templateError } = await supabase
       .from("face_templates")
       .select("user_id, embedding")
+      .in("user_id", memberIds)
       .eq("is_primary", true);
 
     if (templateError) {
@@ -243,7 +315,7 @@ export async function processNextJob(): Promise<WorkerResult> {
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown worker error";
-    await failJob(claimed.id, claimed.photo_id, message);
+    await failJob(claimed.id, claimed.photo_id, message, claimed.attempts);
     return {
       status: "failed",
       jobId: claimed.id,

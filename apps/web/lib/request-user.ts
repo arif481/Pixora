@@ -1,9 +1,6 @@
 import { NextRequest } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
-const DEFAULT_USER_ID = process.env.DEMO_USER_ID ?? "11111111-1111-1111-1111-111111111111";
-const ALLOW_DEMO_USER = process.env.ALLOW_DEMO_USER === "true";
-
 function getBearerToken(request: NextRequest) {
   const headerValue = request.headers.get("authorization");
   if (!headerValue) {
@@ -40,15 +37,6 @@ export async function getRequestUserId(request: NextRequest): Promise<string | n
     if (!error && data.user?.id) {
       return data.user.id;
     }
-  }
-
-  if (ALLOW_DEMO_USER) {
-    const headerUserId = request.headers.get("x-user-id");
-    if (headerUserId && headerUserId.length > 10) {
-      return headerUserId;
-    }
-
-    return DEFAULT_USER_ID;
   }
 
   return null;

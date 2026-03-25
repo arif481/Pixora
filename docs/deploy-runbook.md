@@ -24,6 +24,8 @@
 No external inference service is required.
 
 - Ensure web production env includes `MIN_ENROLL_QUALITY` (recommended `0.50`).
+- For free-tier costs, set `INLINE_PROCESS_ON_UPLOAD=false`.
+- Set `MAX_FACES_PER_JOB=40` (or lower if function duration is tight).
 - Redeploy web if env vars changed:
   - `vercel --prod`
 
@@ -32,6 +34,9 @@ No external inference service is required.
 Workflow file is already present:
 
 - `.github/workflows/process-worker-cron.yml`
+
+Default cadence is every 5 minutes for free-tier cost control.
+Failed jobs are retried with exponential backoff to reduce noisy repeated failures.
 
 Set repository secrets:
 

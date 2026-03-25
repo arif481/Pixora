@@ -6,6 +6,8 @@ import { vectorLiteral } from "@/lib/embeddings";
 import { requireFaceVerification } from "@/lib/face-verification";
 import { processNextJob } from "@/lib/worker";
 
+const INLINE_PROCESS_ON_UPLOAD = process.env.INLINE_PROCESS_ON_UPLOAD === "true";
+
 type PrecomputedFacePayload = {
   bboxX: number;
   bboxY: number;
@@ -183,8 +185,9 @@ export async function POST(
       return NextResponse.json({ error: jobError.message }, { status: 500 });
     }
 
-    // Inline processing: match faces immediately instead of waiting for cron
-    void processNextJob().catch(() => { /* swallow — cron will retry */ });
+    if (INLINE_PROCESS_ON_UPLOAD) {
+      void processNextJob().catch(() => { /* swallow — cron will retry */ });
+    }
 
     const photo = {
       id: insertedPhoto.id,

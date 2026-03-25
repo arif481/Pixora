@@ -162,14 +162,29 @@ export default function EnrollmentPage() {
       }
 
       setProgress(80);
-      const sessionRes = await apiFetch("/api/v1/face/enrollment/session", { method: "POST" });
-      if (!sessionRes.ok) {
+      let sessionData: { sessionId: string } | null = null;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const sessionRes = await apiFetch("/api/v1/face/enrollment/session", { method: "POST" });
+        if (sessionRes.ok) {
+          sessionData = await sessionRes.json();
+          break;
+        }
+        if (attempt === 0) {
+          // Retry once after a brief pause
+          await new Promise((r) => setTimeout(r, 1000));
+          continue;
+        }
         const p = await sessionRes.json();
-        setResult(p?.error ?? "Failed to create session");
+        setResult(p?.error ?? "Failed to create enrollment session. Please try again.");
         setStep("capture");
         return;
       }
-      const sessionData = await sessionRes.json();
+
+      if (!sessionData?.sessionId) {
+        setResult("Failed to create enrollment session. Please try again.");
+        setStep("capture");
+        return;
+      }
 
       setProgress(90);
       const complete = await apiFetch("/api/v1/face/enrollment/complete", {

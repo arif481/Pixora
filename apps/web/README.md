@@ -31,7 +31,7 @@
 ## Auth behavior
 
 - Production mode expects `Authorization: Bearer <supabase_access_token>`.
-- Optional local fallback can be enabled with `ALLOW_DEMO_USER=true` (uses `x-user-id`/`DEMO_USER_ID`).
+- API requests without a valid Supabase bearer token are rejected as unauthorized.
 
 ## Trigger worker manually
 
