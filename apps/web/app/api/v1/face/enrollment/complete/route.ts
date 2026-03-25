@@ -64,7 +64,7 @@ export async function POST(request: NextRequest) {
     }
     await ensureProfile(userId);
     const body = await request.json();
-    if (!body?.sessionId || !Array.isArray(body?.embedding)) {
+    if (!body?.sessionId || (!Array.isArray(body?.embedding) && !Array.isArray(body?.embeddings))) {
       return NextResponse.json(
         { error: "sessionId and embedding are required" },
         { status: 400 }
