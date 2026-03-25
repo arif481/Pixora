@@ -3,7 +3,7 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api-client";
-import { detectBrowserFaces } from "@/lib/browser-face";
+import { detectBrowserFaces, filterOutlierEmbeddings } from "@/lib/browser-face";
 import { BROWSER_FACE_MODEL_VERSION } from "@/lib/face-model";
 import { cosineSimilarity } from "@/lib/embeddings";
 
@@ -133,10 +133,13 @@ export default function EnrollmentPage() {
       setProgress(65);
       const avgQuality = qualityScores.reduce((s, v) => s + v, 0) / qualityScores.length;
 
+      // Outlier filtering: remove the most dissimilar embedding
+      const filteredEmbeddings = filterOutlierEmbeddings(embeddings);
+
       let minSim = 1;
-      for (let a = 0; a < embeddings.length; a++) {
-        for (let b = a + 1; b < embeddings.length; b++) {
-          minSim = Math.min(minSim, cosineSimilarity(embeddings[a], embeddings[b]));
+      for (let a = 0; a < filteredEmbeddings.length; a++) {
+        for (let b = a + 1; b < filteredEmbeddings.length; b++) {
+          minSim = Math.min(minSim, cosineSimilarity(filteredEmbeddings[a], filteredEmbeddings[b]));
         }
       }
       if (minSim < 0.25) {
@@ -174,7 +177,7 @@ export default function EnrollmentPage() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           sessionId: sessionData.sessionId,
-          embeddings,
+          embeddings: filteredEmbeddings,
           qualityScore: avgQuality,
           flags,
           modelVersion: BROWSER_FACE_MODEL_VERSION,
