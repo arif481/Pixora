@@ -16,9 +16,10 @@ let faceapi: typeof import("@vladmandic/face-api") | null = null;
 export type BrowserFace = {
   bbox: { x: number; y: number; w: number; h: number };
   qualityScore: number;
+  sharpness: number;
   /** 512-d embedding (128-d FaceNet neural descriptor, zero-padded) */
   embedding: number[];
-  liveness: { blink: number; smile: number; mouthOpen: number; yaw: number };
+  liveness: { blink: number; smile: number; mouthOpen: number; yaw: number; pitch: number; textureScore: number };
 };
 
 const EMBEDDING_SIZE = 512;
@@ -60,6 +61,21 @@ async function ensureModelsLoaded() {
   return modelsLoadingPromise;
 }
 
+/* ═══ Gamma Correction ═══ */
+
+function applyGammaCorrection(imageData: ImageData, gamma: number): void {
+  if (Math.abs(gamma - 1.0) < 0.01) return;
+  const { data } = imageData;
+  const invGamma = 1.0 / gamma;
+  const lut = new Uint8Array(256);
+  for (let i = 0; i < 256; i++) lut[i] = clamp(Math.round(255 * ((i / 255) ** invGamma)), 0, 255);
+  for (let i = 0; i < data.length; i += 4) {
+    data[i] = lut[data[i]];
+    data[i + 1] = lut[data[i + 1]];
+    data[i + 2] = lut[data[i + 2]];
+  }
+}
+
 /* ═══ CLAHE-style Adaptive Histogram Equalization ═══ */
 
 function adaptiveHistogramEqualization(
@@ -86,7 +102,46 @@ function adaptiveHistogramEqualization(
   for (let i = 0; i < totalPx; i++) variance += (lum[i] - meanLum) ** 2;
   const stddev = Math.sqrt(variance / totalPx);
 
-  if (meanLum > 90 && stddev > 45) return; // image is fine
+  // Gamma correction for very dark or overexposed images
+  if (meanLum < 60) {
+    applyGammaCorrection(imageData, 0.6 + (meanLum / 60) * 0.4);
+    // Recompute luminance after gamma
+    for (let i = 0; i < totalPx; i++) {
+      const idx = i * 4;
+      lum[i] = 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
+    }
+  } else if (meanLum > 200) {
+    applyGammaCorrection(imageData, 1.2 + ((meanLum - 200) / 55) * 0.5);
+    for (let i = 0; i < totalPx; i++) {
+      const idx = i * 4;
+      lum[i] = 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
+    }
+  }
+
+  // Smarter skip: only skip if BOTH global AND local statistics are good
+  if (meanLum > 80 && meanLum < 200 && stddev > 40) {
+    // Check local patches — if any quadrant has low contrast, still apply CLAHE
+    const quadrants = [
+      { x0: 0, y0: 0, x1: width >> 1, y1: height >> 1 },
+      { x0: width >> 1, y0: 0, x1: width, y1: height >> 1 },
+      { x0: 0, y0: height >> 1, x1: width >> 1, y1: height },
+      { x0: width >> 1, y0: height >> 1, x1: width, y1: height },
+    ];
+    let allGood = true;
+    for (const q of quadrants) {
+      let qSum = 0, qCount = 0;
+      for (let y = q.y0; y < q.y1; y++) {
+        for (let x = q.x0; x < q.x1; x++) { qSum += lum[y * width + x]; qCount++; }
+      }
+      const qMean = qSum / Math.max(qCount, 1);
+      let qVar = 0;
+      for (let y = q.y0; y < q.y1; y++) {
+        for (let x = q.x0; x < q.x1; x++) { qVar += (lum[y * width + x] - qMean) ** 2; }
+      }
+      if (Math.sqrt(qVar / Math.max(qCount, 1)) < 25) { allGood = false; break; }
+    }
+    if (allGood) return; // all quadrants have good contrast
+  }
 
   const cdfs: Float32Array[][] = [];
   for (let ty = 0; ty < tileGridY; ty++) {
@@ -252,6 +307,115 @@ function averageEmbeddings(a: number[], b: number[]): number[] {
   return avg;
 }
 
+/* ═══ Sharpness Detection (Laplacian Variance) ═══ */
+
+function computeSharpness(
+  canvas: HTMLCanvasElement,
+  box: { x: number; y: number; width: number; height: number }
+): number {
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return 0.5;
+
+  // Extract face region with padding
+  const pad = 0.1;
+  const fx = Math.max(0, Math.round(box.x - box.width * pad));
+  const fy = Math.max(0, Math.round(box.y - box.height * pad));
+  const fw = Math.min(canvas.width - fx, Math.round(box.width * (1 + 2 * pad)));
+  const fh = Math.min(canvas.height - fy, Math.round(box.height * (1 + 2 * pad)));
+
+  if (fw < 10 || fh < 10) return 0;
+
+  const faceData = ctx.getImageData(fx, fy, fw, fh);
+  const gray = new Float32Array(fw * fh);
+  for (let i = 0; i < fw * fh; i++) {
+    const idx = i * 4;
+    gray[i] = 0.299 * faceData.data[idx] + 0.587 * faceData.data[idx + 1] + 0.114 * faceData.data[idx + 2];
+  }
+
+  // Laplacian filter: [0,1,0; 1,-4,1; 0,1,0]
+  let sumLap = 0;
+  let sumLap2 = 0;
+  let count = 0;
+  for (let y = 1; y < fh - 1; y++) {
+    for (let x = 1; x < fw - 1; x++) {
+      const lap =
+        gray[(y - 1) * fw + x] +
+        gray[(y + 1) * fw + x] +
+        gray[y * fw + (x - 1)] +
+        gray[y * fw + (x + 1)] -
+        4 * gray[y * fw + x];
+      sumLap += lap;
+      sumLap2 += lap * lap;
+      count++;
+    }
+  }
+
+  if (count === 0) return 0;
+  const mean = sumLap / count;
+  const variance = sumLap2 / count - mean * mean;
+
+  // Normalize: typical sharp face has variance ~500-2000, blurry ~20-100
+  return clamp(variance / 800, 0, 1);
+}
+
+/* ═══ LBP Texture Score (anti-spoofing) ═══ */
+
+function computeTextureScore(
+  canvas: HTMLCanvasElement,
+  box: { x: number; y: number; width: number; height: number }
+): number {
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return 0.5;
+
+  const fx = Math.max(0, Math.round(box.x));
+  const fy = Math.max(0, Math.round(box.y));
+  const fw = Math.min(canvas.width - fx, Math.round(box.width));
+  const fh = Math.min(canvas.height - fy, Math.round(box.height));
+  if (fw < 16 || fh < 16) return 0;
+
+  const faceData = ctx.getImageData(fx, fy, fw, fh);
+  const gray = new Float32Array(fw * fh);
+  for (let i = 0; i < fw * fh; i++) {
+    const idx = i * 4;
+    gray[i] = 0.299 * faceData.data[idx] + 0.587 * faceData.data[idx + 1] + 0.114 * faceData.data[idx + 2];
+  }
+
+  // Simplified LBP: compute local binary pattern histogram variance
+  const hist = new Float32Array(256);
+  let lbpCount = 0;
+  const step = Math.max(1, Math.floor(Math.min(fw, fh) / 64)); // sample for speed
+  for (let y = 1; y < fh - 1; y += step) {
+    for (let x = 1; x < fw - 1; x += step) {
+      const center = gray[y * fw + x];
+      let pattern = 0;
+      if (gray[(y - 1) * fw + (x - 1)] >= center) pattern |= 1;
+      if (gray[(y - 1) * fw + x] >= center) pattern |= 2;
+      if (gray[(y - 1) * fw + (x + 1)] >= center) pattern |= 4;
+      if (gray[y * fw + (x + 1)] >= center) pattern |= 8;
+      if (gray[(y + 1) * fw + (x + 1)] >= center) pattern |= 16;
+      if (gray[(y + 1) * fw + x] >= center) pattern |= 32;
+      if (gray[(y + 1) * fw + (x - 1)] >= center) pattern |= 64;
+      if (gray[y * fw + (x - 1)] >= center) pattern |= 128;
+      hist[pattern]++;
+      lbpCount++;
+    }
+  }
+
+  if (lbpCount === 0) return 0;
+
+  // Normalize histogram and compute variance
+  let histMean = 0;
+  for (let i = 0; i < 256; i++) { hist[i] /= lbpCount; histMean += hist[i]; }
+  histMean /= 256;
+  let histVar = 0;
+  for (let i = 0; i < 256; i++) histVar += (hist[i] - histMean) ** 2;
+  histVar /= 256;
+
+  // Real 3D faces have higher LBP variance than flat prints/screens
+  // Typical real face: 0.0001-0.001, print: 0.00001-0.00005
+  return clamp(histVar / 0.0004, 0, 1);
+}
+
 /* ═══ Liveness from 68 landmarks + expressions ═══ */
 
 function ear(pts: Point[], indices: number[]): number {
@@ -264,7 +428,9 @@ function ear(pts: Point[], indices: number[]): number {
 
 function extractLiveness(
   landmarks: FaceLandmarks68,
-  expressions: FaceExpressions
+  expressions: FaceExpressions,
+  canvas: HTMLCanvasElement,
+  box: { x: number; y: number; width: number; height: number }
 ): BrowserFace["liveness"] {
   const pts = landmarks.positions;
   const leftEAR = ear(pts, [36, 37, 38, 39, 40, 41]);
@@ -277,7 +443,16 @@ function extractLiveness(
   const faceCX = (pts[0].x + pts[16].x) / 2;
   const faceW = Math.abs(pts[16].x - pts[0].x);
   const yaw = faceW > 0 ? clamp((pts[30].x - faceCX) / (faceW / 2), -1, 1) : 0;
-  return { blink, smile, mouthOpen, yaw };
+
+  // Pitch estimation from nose tip (pt 30) vs nose bridge (pt 27)
+  const noseLen = Math.abs(pts[30].y - pts[27].y);
+  const faceH = Math.abs(pts[8].y - pts[27].y);
+  const pitch = faceH > 0 ? clamp((noseLen / faceH - 0.45) / 0.35, -1, 1) : 0;
+
+  // LBP texture score for anti-spoofing
+  const textureScore = computeTextureScore(canvas, box);
+
+  return { blink, smile, mouthOpen, yaw, pitch, textureScore };
 }
 
 /* ═══ Quality score ═══ */
@@ -286,7 +461,9 @@ function computeQualityScore(
   detection: FaceDetection,
   landmarks: FaceLandmarks68,
   canvasW: number,
-  canvasH: number
+  canvasH: number,
+  sharpness: number,
+  pitch: number
 ): number {
   const box = detection.box;
   const pts = landmarks.positions;
@@ -297,7 +474,16 @@ function computeQualityScore(
   const symScore = faceW > 0 ? clamp(1 - Math.abs(pts[30].x - faceCX) / (faceW / 2), 0, 1) : 0;
   const m = 5;
   const inBounds = box.x > m && box.y > m && box.x + box.width < canvasW - m && box.y + box.height < canvasH - m;
-  return confScore * 0.35 + sizeScore * 0.25 + symScore * 0.25 + (inBounds ? 0.15 : 0.06);
+  // Penalize extreme pitch (looking up/down)
+  const pitchPenalty = clamp(1 - Math.abs(pitch) * 0.8, 0, 1);
+  return (
+    confScore * 0.28 +
+    sizeScore * 0.20 +
+    symScore * 0.18 +
+    sharpness * 0.15 +
+    pitchPenalty * 0.09 +
+    (inBounds ? 0.10 : 0.04)
+  );
 }
 
 /* ═══ Robust Multi-Strategy Detection ═══ */
@@ -361,8 +547,9 @@ export async function detectBrowserFaces(file: File): Promise<BrowserFace[]> {
 
   for (const det of detections) {
     const box = det.detection.box;
-    const liveness = extractLiveness(det.landmarks, det.expressions);
-    const qualityScore = computeQualityScore(det.detection, det.landmarks, canvas.width, canvas.height);
+    const sharpness = computeSharpness(canvas, box);
+    const liveness = extractLiveness(det.landmarks, det.expressions, canvas, box);
+    const qualityScore = computeQualityScore(det.detection, det.landmarks, canvas.width, canvas.height, sharpness, liveness.pitch);
 
     // Face alignment
     const alignedCanvas = alignFaceCanvas(canvas, det.landmarks, box);
@@ -386,6 +573,7 @@ export async function detectBrowserFaces(file: File): Promise<BrowserFace[]> {
     results.push({
       bbox: { x: Math.round(box.x), y: Math.round(box.y), w: Math.round(box.width), h: Math.round(box.height) },
       qualityScore,
+      sharpness,
       embedding: finalEmb,
       liveness,
     });
@@ -397,27 +585,49 @@ export async function detectBrowserFaces(file: File): Promise<BrowserFace[]> {
 /* ═══ Outlier Filtering (enrollment batches) ═══ */
 
 export function filterOutlierEmbeddings(embeddings: number[][]): number[][] {
-  if (embeddings.length <= 2) return embeddings;
+  const MIN_KEEP = 3;
+  let filtered = [...embeddings];
 
-  const scores = embeddings.map((emb, i) => {
-    let totalSim = 0;
-    for (let j = 0; j < embeddings.length; j++) {
-      if (i !== j) totalSim += cosineSim(emb, embeddings[j]);
+  // Multi-pass: remove up to (length - MIN_KEEP) outliers
+  while (filtered.length > MIN_KEEP) {
+    const scores = filtered.map((emb, i) => {
+      let totalSim = 0;
+      for (let j = 0; j < filtered.length; j++) {
+        if (i !== j) totalSim += cosineSim(emb, filtered[j]);
+      }
+      return totalSim / (filtered.length - 1);
+    });
+
+    let worstIdx = 0;
+    let worstScore = scores[0];
+    for (let i = 1; i < scores.length; i++) {
+      if (scores[i] < worstScore) { worstScore = scores[i]; worstIdx = i; }
     }
-    return totalSim / (embeddings.length - 1);
-  });
 
-  let worstIdx = 0;
-  let worstScore = scores[0];
-  for (let i = 1; i < scores.length; i++) {
-    if (scores[i] < worstScore) { worstScore = scores[i]; worstIdx = i; }
+    const meanScore = scores.reduce((a, b) => a + b) / scores.length;
+    // Tighter threshold: 0.08 instead of 0.1
+    if (worstScore < meanScore - 0.08) {
+      filtered = filtered.filter((_, i) => i !== worstIdx);
+    } else {
+      break; // no more outliers
+    }
   }
 
-  const meanScore = scores.reduce((a, b) => a + b) / scores.length;
-  if (worstScore < meanScore - 0.1) {
-    return embeddings.filter((_, i) => i !== worstIdx);
+  return filtered;
+}
+
+/** Compute a confidence metric for enrollment quality (0-1) */
+export function computeEnrollmentConfidence(embeddings: number[][]): number {
+  if (embeddings.length < 2) return 0;
+  let totalSim = 0;
+  let pairs = 0;
+  for (let i = 0; i < embeddings.length; i++) {
+    for (let j = i + 1; j < embeddings.length; j++) {
+      totalSim += cosineSim(embeddings[i], embeddings[j]);
+      pairs++;
+    }
   }
-  return embeddings;
+  return pairs > 0 ? clamp(totalSim / pairs, 0, 1) : 0;
 }
 
 function cosineSim(a: number[], b: number[]): number {

@@ -48,15 +48,21 @@ type WorkerResult = {
   error?: string;
 };
 
+const MATCH_GAP_THRESHOLD = Number(process.env.MATCH_GAP_THRESHOLD ?? 0.06);
+
 function bestMatch(probe: number[], templates: Array<{ userId: string; embedding: number[] }>) {
   let bestUserId: string | null = null;
   let bestScore = -1;
+  let secondBestScore = -1;
 
   for (const template of templates) {
     const score = cosineSimilarity(probe, template.embedding);
     if (score > bestScore) {
+      secondBestScore = bestScore;
       bestScore = score;
       bestUserId = template.userId;
+    } else if (score > secondBestScore) {
+      secondBestScore = score;
     }
   }
 
@@ -64,7 +70,12 @@ function bestMatch(probe: number[], templates: Array<{ userId: string; embedding
     return null;
   }
 
-  return { userId: bestUserId, score: bestScore };
+  // Reject ambiguous matches — gap between best and second-best is too small
+  if (secondBestScore >= 0 && bestScore - secondBestScore < MATCH_GAP_THRESHOLD) {
+    return { userId: bestUserId, score: bestScore, ambiguous: true as const };
+  }
+
+  return { userId: bestUserId, score: bestScore, ambiguous: false as const };
 }
 
 async function claimNextJob() {
@@ -205,19 +216,30 @@ export async function processNextJob(): Promise<WorkerResult> {
 
     const { data: templates, error: templateError } = await supabase
       .from("face_templates")
-      .select("user_id, embedding")
-      .in("user_id", memberIds)
-      .eq("is_primary", true);
+      .select("user_id, embedding, is_primary")
+      .in("user_id", memberIds);
 
     if (templateError) {
       throw new Error(templateError.message);
     }
 
-    const templateRows = (templates ?? []) as FaceTemplate[];
+    const templateRows = (templates ?? []) as (FaceTemplate & { is_primary: boolean })[];
 
-    const candidateTemplates = templateRows
-      .map((row) => ({ userId: row.user_id, embedding: parseVector(row.embedding) }))
-      .filter((row) => row.embedding.length > 0);
+    // Group templates by user — max score across all templates per user
+    const userTemplates = new Map<string, number[][]>();
+    for (const row of templateRows) {
+      const emb = parseVector(row.embedding);
+      if (emb.length === 0) continue;
+      if (!userTemplates.has(row.user_id)) userTemplates.set(row.user_id, []);
+      userTemplates.get(row.user_id)!.push(emb);
+    }
+
+    const candidateTemplates: Array<{ userId: string; embedding: number[] }> = [];
+    for (const [userId, embeddings] of userTemplates) {
+      for (const emb of embeddings) {
+        candidateTemplates.push({ userId, embedding: emb });
+      }
+    }
 
     let matchesCreated = 0;
     let sharesCreated = 0;
@@ -235,6 +257,17 @@ export async function processNextJob(): Promise<WorkerResult> {
       }
 
       if (best.score < reviewMin) {
+        continue;
+      }
+
+      // Skip ambiguous matches — too close between best and second-best
+      if (best.ambiguous) {
+        await supabase.from("audit_logs").insert({
+          action: "ambiguous_match",
+          entity_type: "photo_face",
+          entity_id: face.id,
+          metadata: { score: Number(best.score.toFixed(5)), userId: best.userId },
+        });
         continue;
       }
 

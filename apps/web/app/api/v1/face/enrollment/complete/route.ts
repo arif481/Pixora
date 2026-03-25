@@ -5,6 +5,7 @@ import { createSupabaseServerClient } from "@/lib/supabase-server";
 import { BROWSER_FACE_MODEL_VERSION } from "@/lib/face-model";
 import { ensureProfile } from "@/lib/profile";
 import { backfillSharesForUser } from "@/lib/share-backfill";
+import { cosineSimilarity } from "@/lib/embeddings";
 
 const MIN_ENROLL_QUALITY = Number(process.env.MIN_ENROLL_QUALITY ?? 0.5);
 
@@ -54,6 +55,37 @@ function mergeEmbeddings(embeddings: number[][]) {
 
 function vectorLiteral(values: number[]) {
   return `[${values.join(",")}]`;
+}
+
+/** Select the N most diverse embeddings by maximizing pairwise dissimilarity */
+function selectDiverseEmbeddings(embeddings: number[][], n: number): number[] {
+  if (embeddings.length <= n) return embeddings.map((_, i) => i);
+
+  // Greedy farthest-point sampling
+  const selected: number[] = [0]; // start with first
+  const minDists = new Float64Array(embeddings.length).fill(Infinity);
+
+  while (selected.length < n) {
+    const lastIdx = selected[selected.length - 1];
+    // Update min distances from newly selected point
+    for (let i = 0; i < embeddings.length; i++) {
+      if (selected.includes(i)) continue;
+      const sim = cosineSimilarity(embeddings[i], embeddings[lastIdx]);
+      const dist = 1 - sim;
+      minDists[i] = Math.min(minDists[i], dist);
+    }
+    // Pick the farthest unselected point
+    let bestIdx = -1;
+    let bestDist = -1;
+    for (let i = 0; i < embeddings.length; i++) {
+      if (selected.includes(i)) continue;
+      if (minDists[i] > bestDist) { bestDist = minDists[i]; bestIdx = i; }
+    }
+    if (bestIdx >= 0) selected.push(bestIdx);
+    else break;
+  }
+
+  return selected;
 }
 
 export async function POST(request: NextRequest) {
@@ -117,21 +149,23 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Clear ALL old templates (primary and auxiliary) for this user
     await supabase
       .from("face_templates")
-      .update({ is_primary: false })
-      .eq("user_id", userId)
-      .eq("is_primary", true);
+      .delete()
+      .eq("user_id", userId);
+
+    const modelVersion =
+      typeof body.modelVersion === "string" && body.modelVersion.length > 0
+        ? body.modelVersion
+        : BROWSER_FACE_MODEL_VERSION;
 
     const { data: template, error: templateError } = await supabase
       .from("face_templates")
       .insert({
         user_id: userId,
         embedding: vectorLiteral(embedding),
-        model_version:
-          typeof body.modelVersion === "string" && body.modelVersion.length > 0
-            ? body.modelVersion
-            : BROWSER_FACE_MODEL_VERSION,
+        model_version: modelVersion,
         is_primary: true,
       })
       .select("id")
@@ -144,14 +178,24 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Store up to 3 most diverse individual embeddings as auxiliary templates
+    if (embeddingCandidates.length >= 3) {
+      // Find most diverse embeddings by selecting the ones with lowest avg similarity to each other
+      const diverseIndices = selectDiverseEmbeddings(embeddingCandidates, 3);
+      const auxInserts = diverseIndices.map((idx) => ({
+        user_id: userId,
+        embedding: vectorLiteral(embeddingCandidates[idx]),
+        model_version: modelVersion,
+        is_primary: false,
+      }));
+      await supabase.from("face_templates").insert(auxInserts);
+    }
+
     const backfill = await backfillSharesForUser(userId);
 
     return NextResponse.json({
       status: "enrolled",
-      modelVersion:
-        typeof body.modelVersion === "string" && body.modelVersion.length > 0
-          ? body.modelVersion
-          : BROWSER_FACE_MODEL_VERSION,
+      modelVersion,
       templateId: template.id,
       backfill,
     });
