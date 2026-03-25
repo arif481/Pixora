@@ -1,1 +1,1 @@
-export const BROWSER_FACE_MODEL_VERSION = "browser-mediapipe-landmarks-v1";
+export const BROWSER_FACE_MODEL_VERSION = "browser-faceapi-neural-v1";

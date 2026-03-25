@@ -1,5 +1,15 @@
-import { FaceLandmarker, FilesetResolver } from "@mediapipe/tasks-vision";
-import { BROWSER_FACE_MODEL_VERSION } from "@/lib/face-model";
+/**
+ * browser-face.ts – Client-side face detection using @vladmandic/face-api
+ *
+ * Uses neural-network embeddings (128-d FaceNet) instead of geometric
+ * landmark distances, providing dramatically better face recognition.
+ * Embeddings are zero-padded to 512-d for Supabase vector(512) compatibility.
+ *
+ * Also includes canvas-based image preprocessing (contrast stretching,
+ * sharpening) to improve detection under poor lighting conditions.
+ */
+
+import * as faceapi from "@vladmandic/face-api";
 
 export type BrowserFace = {
   bbox: {
@@ -9,7 +19,7 @@ export type BrowserFace = {
     h: number;
   };
   qualityScore: number;
-  /** Expression-invariant geometric embedding for identity matching */
+  /** 512-d embedding (128-d FaceNet neural descriptor zero-padded) */
   embedding: number[];
   liveness: {
     blink: number;
@@ -20,325 +30,107 @@ export type BrowserFace = {
 };
 
 const EMBEDDING_SIZE = 512;
-const VISION_WASM_PATH =
-  "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm";
-const FACE_LANDMARKER_MODEL_PATH =
-  "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task";
+const NEURAL_DIM = 128;
+const MODELS_PATH = "/models";
+const MAX_IMAGE_DIM = 1920;
 
-let landmarkerPromise: Promise<FaceLandmarker> | null = null;
+let modelsLoaded = false;
+let modelsLoadingPromise: Promise<void> | null = null;
 
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
 }
 
-/* ─── Vector helpers ─── */
+/* ─── Model loading ─── */
 
-function normalizeVector(input: number[]) {
-  let squared = 0;
-  for (const value of input) {
-    squared += value * value;
-  }
-  if (squared === 0) return input;
-  const norm = Math.sqrt(squared);
-  return input.map((v) => v / norm);
+async function ensureModelsLoaded() {
+  if (modelsLoaded) return;
+  if (modelsLoadingPromise) return modelsLoadingPromise;
+
+  modelsLoadingPromise = (async () => {
+    await faceapi.nets.ssdMobilenetv1.loadFromUri(MODELS_PATH);
+    await faceapi.nets.faceLandmark68Net.loadFromUri(MODELS_PATH);
+    await faceapi.nets.faceRecognitionNet.loadFromUri(MODELS_PATH);
+    await faceapi.nets.faceExpressionNet.loadFromUri(MODELS_PATH);
+    modelsLoaded = true;
+  })();
+
+  return modelsLoadingPromise;
 }
 
-/* ─── Landmark index sets (MediaPipe 478-point mesh) ─── */
+/* ─── Image preprocessing ─── */
 
-// Key anatomical landmark indices for structural features
-const LEFT_EYE_INNER = 133;
-const LEFT_EYE_OUTER = 33;
-const RIGHT_EYE_INNER = 362;
-const RIGHT_EYE_OUTER = 263;
-const NOSE_TIP = 1;
-const NOSE_BRIDGE = 6;
-const LEFT_MOUTH_CORNER = 61;
-const RIGHT_MOUTH_CORNER = 291;
-const CHIN = 152;
-const FOREHEAD = 10;
-const LEFT_CHEEK = 234;
-const RIGHT_CHEEK = 454;
-const LEFT_EAR = 127;
-const RIGHT_EAR = 356;
-const UPPER_LIP = 13;
-const LOWER_LIP = 14;
-const NOSE_LEFT = 98;
-const NOSE_RIGHT = 327;
-const LEFT_EYEBROW_INNER = 107;
-const LEFT_EYEBROW_OUTER = 70;
-const RIGHT_EYEBROW_INNER = 336;
-const RIGHT_EYEBROW_OUTER = 300;
-const LEFT_JAW = 172;
-const RIGHT_JAW = 397;
+/**
+ * Analyze image brightness and contrast from pixel data.
+ * Returns { mean, stddev } of luminance values.
+ */
+function analyzeLuminance(imageData: ImageData): { mean: number; stddev: number } {
+  const data = imageData.data;
+  let sum = 0;
+  const count = data.length / 4;
 
-// Structural landmarks (less affected by expression)
-const STRUCTURAL_INDICES = [
-  // Eye corners (4)
-  LEFT_EYE_INNER, LEFT_EYE_OUTER, RIGHT_EYE_INNER, RIGHT_EYE_OUTER,
-  // Nose (5)
-  NOSE_TIP, NOSE_BRIDGE, NOSE_LEFT, NOSE_RIGHT, 4,
-  // Face outline (6)
-  CHIN, FOREHEAD, LEFT_CHEEK, RIGHT_CHEEK, LEFT_EAR, RIGHT_EAR,
-  // Eyebrows (4)
-  LEFT_EYEBROW_INNER, LEFT_EYEBROW_OUTER, RIGHT_EYEBROW_INNER, RIGHT_EYEBROW_OUTER,
-  // Jaw (2)
-  LEFT_JAW, RIGHT_JAW,
-  // Additional structural points around face contour
-  21, 54, 103, 67, 109, 10, 338, 297, 332, 284,
-  // Forehead & temples
-  251, 389, 162, 356, 127,
-  // Additional nose bridge
-  168, 197, 195, 5,
-  // Cheekbone
-  116, 345, 123, 352,
-  // Chin contour
-  150, 149, 176, 148, 377, 378, 400, 379,
-];
-
-// Pairs of structural landmarks for distance features
-const STRUCTURAL_PAIRS: [number, number][] = [];
-
-function initStructuralPairs() {
-  if (STRUCTURAL_PAIRS.length > 0) return;
-
-  // Generate all unique pairs from structural indices
-  for (let i = 0; i < STRUCTURAL_INDICES.length; i++) {
-    for (let j = i + 1; j < STRUCTURAL_INDICES.length; j++) {
-      STRUCTURAL_PAIRS.push([STRUCTURAL_INDICES[i], STRUCTURAL_INDICES[j]]);
-    }
+  for (let i = 0; i < data.length; i += 4) {
+    // ITU-R BT.601 luminance
+    const lum = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+    sum += lum;
   }
-}
 
-type P3 = { x: number; y: number; z: number };
+  const mean = sum / count;
+  let variance = 0;
 
-function dist3d(a: P3, b: P3): number {
-  const dx = a.x - b.x;
-  const dy = a.y - b.y;
-  const dz = a.z - b.z;
-  return Math.sqrt(dx * dx + dy * dy + dz * dz);
+  for (let i = 0; i < data.length; i += 4) {
+    const lum = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+    variance += (lum - mean) ** 2;
+  }
+
+  return { mean, stddev: Math.sqrt(variance / count) };
 }
 
 /**
- * Create an expression-invariant geometric embedding.
- *
- * Strategy:
- * 1. Normalize face: translate to nose origin, scale by inter-eye distance
- * 2. Compute pairwise distances between structural landmarks
- * 3. Compute facial ratios for scale-invariant features
- * 4. Combine, pad/truncate to EMBEDDING_SIZE, L2-normalize
+ * Apply contrast stretching to an image if it's too dark or too flat.
+ * Modifies imageData in-place.
  */
-function createGeometricEmbedding(
-  landmarks: Array<{ x: number; y: number; z: number }>
-): number[] {
-  if (landmarks.length < 468) {
-    return new Array(EMBEDDING_SIZE).fill(0);
+function autoContrast(imageData: ImageData): void {
+  const { mean, stddev } = analyzeLuminance(imageData);
+  const data = imageData.data;
+
+  // Only apply if image is too dark (mean < 80) or too flat (stddev < 40)
+  if (mean > 80 && stddev > 40) return;
+
+  // Find actual min/max luminance for stretching
+  let minLum = 255;
+  let maxLum = 0;
+
+  for (let i = 0; i < data.length; i += 4) {
+    const lum = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+    minLum = Math.min(minLum, lum);
+    maxLum = Math.max(maxLum, lum);
   }
 
-  initStructuralPairs();
+  // Use 1st/99th percentile to avoid outliers
+  const range = maxLum - minLum;
+  if (range < 10) return; // Almost uniform, skip
 
-  const leftEye = landmarks[LEFT_EYE_OUTER];
-  const rightEye = landmarks[RIGHT_EYE_OUTER];
-  const noseTip = landmarks[NOSE_TIP];
+  const lo = minLum + range * 0.01;
+  const hi = maxLum - range * 0.01;
+  const scale = 255 / Math.max(hi - lo, 1);
 
-  // Inter-eye distance as normalization scale
-  const interEyeDist = dist3d(leftEye, rightEye);
-  if (interEyeDist < 1e-6) {
-    return new Array(EMBEDDING_SIZE).fill(0);
+  for (let i = 0; i < data.length; i += 4) {
+    data[i] = clamp(Math.round((data[i] - lo) * scale), 0, 255);
+    data[i + 1] = clamp(Math.round((data[i + 1] - lo) * scale), 0, 255);
+    data[i + 2] = clamp(Math.round((data[i + 2] - lo) * scale), 0, 255);
   }
-
-  // Translate so nose tip is origin, scale by inter-eye distance
-  const norm: P3[] = landmarks.map((p) => ({
-    x: (p.x - noseTip.x) / interEyeDist,
-    y: (p.y - noseTip.y) / interEyeDist,
-    z: (p.z - noseTip.z) / interEyeDist,
-  }));
-
-  // Feature 1: Normalized structural landmark positions (x, y, z)
-  const posFeatures: number[] = [];
-  for (const idx of STRUCTURAL_INDICES) {
-    if (idx < norm.length) {
-      posFeatures.push(norm[idx].x, norm[idx].y, norm[idx].z);
-    }
-  }
-
-  // Feature 2: Pairwise distances between structural landmarks (normalized)
-  const distFeatures: number[] = [];
-  // Take a subset to keep size manageable
-  const maxPairs = Math.min(STRUCTURAL_PAIRS.length, 300);
-  for (let i = 0; i < maxPairs; i++) {
-    const [a, b] = STRUCTURAL_PAIRS[i];
-    if (a < norm.length && b < norm.length) {
-      distFeatures.push(dist3d(norm[a], norm[b]));
-    }
-  }
-
-  // Feature 3: Key facial ratios (very identity-discriminative)
-  const chin = norm[CHIN];
-  const forehead = norm[FOREHEAD];
-  const leftCheek = norm[LEFT_CHEEK];
-  const rightCheek = norm[RIGHT_CHEEK];
-  const leftMouth = norm[LEFT_MOUTH_CORNER];
-  const rightMouth = norm[RIGHT_MOUTH_CORNER];
-  const noseBridge = norm[NOSE_BRIDGE];
-
-  const faceHeight = dist3d(forehead, chin);
-  const faceWidth = dist3d(leftCheek, rightCheek);
-
-  const ratioFeatures: number[] = [];
-  if (faceHeight > 1e-6 && faceWidth > 1e-6) {
-    ratioFeatures.push(
-      faceWidth / faceHeight,                                    // face aspect ratio
-      dist3d(norm[LEFT_EYE_INNER], norm[RIGHT_EYE_INNER]) / faceWidth, // inner eye width ratio
-      dist3d(noseTip, noseBridge) / faceHeight,                  // nose length ratio
-      dist3d(leftMouth, rightMouth) / faceWidth,                 // mouth width ratio
-      dist3d(noseTip, chin) / faceHeight,                        // nose-to-chin ratio
-      dist3d(forehead, noseBridge) / faceHeight,                 // forehead-to-nose ratio
-      dist3d(norm[LEFT_EYEBROW_OUTER], norm[LEFT_EYE_OUTER]) / faceHeight, // eyebrow height left
-      dist3d(norm[RIGHT_EYEBROW_OUTER], norm[RIGHT_EYE_OUTER]) / faceHeight, // eyebrow height right
-      dist3d(norm[LEFT_JAW], norm[RIGHT_JAW]) / faceWidth,      // jaw width ratio
-      dist3d(norm[NOSE_LEFT], norm[NOSE_RIGHT]) / faceWidth,    // nose width ratio
-      dist3d(norm[LEFT_EAR], norm[RIGHT_EAR]) / faceWidth,      // ear width ratio
-    );
-  }
-
-  // Combine all features
-  const raw = [...posFeatures, ...distFeatures, ...ratioFeatures];
-
-  // Pad or truncate to EMBEDDING_SIZE
-  const embedding = new Array<number>(EMBEDDING_SIZE).fill(0);
-  for (let i = 0; i < Math.min(raw.length, EMBEDDING_SIZE); i++) {
-    embedding[i] = raw[i];
-  }
-
-  return normalizeVector(embedding);
 }
-
-/* ─── Quality & bounding box ─── */
 
 /**
- * Compute face quality from structural signals rather than MediaPipe's
- * visibility/presence values (which are near-zero for face landmarks).
+ * Load a File into an HTMLCanvasElement with preprocessing applied.
  *
- * Signals used:
- *  - Face size relative to image (larger = better)
- *  - Landmark spread (faces that fill the detection area = better)
- *  - Facial symmetry (frontal faces = better)
- *  - Landmark count (more detected = better)
+ * Pipeline:
+ * 1. createImageBitmap normalizes EXIF orientation
+ * 2. Scales oversized images to MAX_IMAGE_DIM
+ * 3. Applies auto-contrast stretching for underexposed images
  */
-function computeQualityScore(
-  landmarks: Array<{ x: number; y: number; z: number }>,
-  imageWidth: number,
-  imageHeight: number
-): number {
-  if (landmarks.length < 100) return 0.1;
-
-  // 1. Landmark count score (expect 468+)
-  const countScore = clamp(landmarks.length / 468, 0, 1);
-
-  // 2. Face size relative to image
-  let minX = 1, minY = 1, maxX = 0, maxY = 0;
-  for (const p of landmarks) {
-    minX = Math.min(minX, p.x);
-    minY = Math.min(minY, p.y);
-    maxX = Math.max(maxX, p.x);
-    maxY = Math.max(maxY, p.y);
-  }
-  const faceW = maxX - minX;
-  const faceH = maxY - minY;
-  const faceArea = faceW * faceH;
-  // A face covering ~5-50% of the image is ideal
-  const sizeScore = clamp(faceArea / 0.15, 0, 1);
-
-  // 3. Symmetry score (how centered is nose between eyes)
-  const leftEye = landmarks[LEFT_EYE_OUTER];
-  const rightEye = landmarks[RIGHT_EYE_OUTER];
-  const nose = landmarks[NOSE_TIP];
-  let symmetryScore = 0.8;
-  if (leftEye && rightEye && nose) {
-    const midX = (leftEye.x + rightEye.x) / 2;
-    const eyeDist = Math.abs(rightEye.x - leftEye.x);
-    if (eyeDist > 0.001) {
-      const asymmetry = Math.abs(nose.x - midX) / eyeDist;
-      symmetryScore = clamp(1 - asymmetry * 2, 0, 1);
-    }
-  }
-
-  // 4. Face proportions check (aspect ratio sanity)
-  const aspectRatio = faceH > 0 ? faceW / faceH : 0;
-  const proportionScore = (aspectRatio > 0.5 && aspectRatio < 1.5) ? 1.0 : 0.5;
-
-  // Weighted combination
-  const quality =
-    countScore * 0.2 +
-    sizeScore * 0.35 +
-    symmetryScore * 0.3 +
-    proportionScore * 0.15;
-
-  return clamp(quality, 0, 1);
-}
-
-function computeBox(
-  landmarks: Array<{ x: number; y: number }>,
-  width: number,
-  height: number
-) {
-  let minX = 1,
-    minY = 1,
-    maxX = 0,
-    maxY = 0;
-
-  for (const point of landmarks) {
-    minX = Math.min(minX, point.x);
-    minY = Math.min(minY, point.y);
-    maxX = Math.max(maxX, point.x);
-    maxY = Math.max(maxY, point.y);
-  }
-
-  const x = Math.round(clamp(minX, 0, 1) * width);
-  const y = Math.round(clamp(minY, 0, 1) * height);
-  const w = Math.max(1, Math.round((clamp(maxX, 0, 1) - clamp(minX, 0, 1)) * width));
-  const h = Math.max(1, Math.round((clamp(maxY, 0, 1) - clamp(minY, 0, 1)) * height));
-
-  return { x, y, w, h };
-}
-
-/* ─── Liveness signals (kept separate from identity embedding) ─── */
-
-function getBlendshapeScore(
-  blendshapes: Array<{ categoryName: string; score: number }>,
-  categoryName: string
-) {
-  const found = blendshapes.find((s) => s.categoryName === categoryName);
-  return clamp(found?.score ?? 0, 0, 1);
-}
-
-function estimateYaw(landmarks: Array<{ x: number; y: number }>) {
-  const leftEye = landmarks[LEFT_EYE_OUTER];
-  const rightEye = landmarks[RIGHT_EYE_OUTER];
-  const noseTip = landmarks[NOSE_TIP];
-
-  if (!leftEye || !rightEye || !noseTip) return 0;
-
-  const midEyeX = (leftEye.x + rightEye.x) / 2;
-  const eyeDistance = Math.abs(rightEye.x - leftEye.x);
-  if (eyeDistance < 0.0001) return 0;
-
-  return clamp((noseTip.x - midEyeX) / eyeDistance, -1, 1);
-}
-
-/* ─── Image loading ─── */
-
-const MAX_IMAGE_DIM = 1920;
-
-/**
- * Load a File into an HTMLImageElement suitable for MediaPipe.
- *
- * Drawing through createImageBitmap + canvas:
- * 1. Normalizes EXIF orientation (phone photos)
- * 2. Caps oversized images to avoid WebGL texture limits
- * 3. Ensures pixel data is fully decoded before detection
- */
-async function createImageFromFile(file: File) {
+async function preprocessImage(file: File): Promise<HTMLCanvasElement> {
   const bitmap = await createImageBitmap(file);
 
   let { width, height } = bitmap;
@@ -350,7 +142,7 @@ async function createImageFromFile(file: File) {
     height = Math.round(height * scale);
   }
 
-  // Draw through canvas to normalize orientation + pixel data
+  // Draw to canvas
   const canvas = document.createElement("canvas");
   canvas.width = width;
   canvas.height = height;
@@ -359,98 +151,193 @@ async function createImageFromFile(file: File) {
   ctx.drawImage(bitmap, 0, 0, width, height);
   bitmap.close();
 
-  // Convert back to HTMLImageElement for MediaPipe
-  const blob = await new Promise<Blob>((resolve, reject) => {
-    canvas.toBlob(
-      (b) => (b ? resolve(b) : reject(new Error("Canvas toBlob failed"))),
-      "image/jpeg",
-      0.92
-    );
-  });
-  const url = URL.createObjectURL(blob);
+  // Apply auto-contrast
+  const imageData = ctx.getImageData(0, 0, width, height);
+  autoContrast(imageData);
+  ctx.putImageData(imageData, 0, 0);
 
-  try {
-    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
-      const img = new Image();
-      img.onload = () => resolve(img);
-      img.onerror = () => reject(new Error("Failed to load processed image"));
-      img.src = url;
-    });
-    return image;
-  } finally {
-    URL.revokeObjectURL(url);
-  }
+  return canvas;
 }
 
-/* ─── Singleton landmarker ─── */
+/* ─── Embedding helpers ─── */
 
-async function getLandmarker() {
-  if (!landmarkerPromise) {
-    landmarkerPromise = (async () => {
-      const fileset = await FilesetResolver.forVisionTasks(VISION_WASM_PATH);
-      return FaceLandmarker.createFromOptions(fileset, {
-        baseOptions: {
-          modelAssetPath: FACE_LANDMARKER_MODEL_PATH,
-        },
-        runningMode: "IMAGE",
-        numFaces: 8,
-        outputFaceBlendshapes: true,
-      });
-    })();
+/**
+ * Zero-pad a 128-d neural descriptor to 512-d for DB compatibility.
+ * Cosine similarity is preserved because dot product with zero is 0.
+ */
+function padEmbedding(descriptor: Float32Array): number[] {
+  const embedding = new Array<number>(EMBEDDING_SIZE).fill(0);
+  for (let i = 0; i < Math.min(descriptor.length, NEURAL_DIM); i++) {
+    embedding[i] = descriptor[i];
   }
-  return landmarkerPromise;
+  // L2 normalize
+  let norm = 0;
+  for (const v of embedding) norm += v * v;
+  norm = Math.sqrt(norm);
+  if (norm > 0) {
+    for (let i = 0; i < EMBEDDING_SIZE; i++) {
+      embedding[i] /= norm;
+    }
+  }
+  return embedding;
+}
+
+/* ─── Liveness extraction from 68-point landmarks ─── */
+
+/**
+ * 68-point landmark indices (face-api.js):
+ *  - Left eye: 36-41
+ *  - Right eye: 42-47
+ *  - Mouth: 48-67
+ *  - Nose: 27-35
+ *  - Jaw: 0-16
+ */
+
+function eyeAspectRatio(
+  landmarks: faceapi.Point[],
+  indices: number[]
+): number {
+  // EAR = (|p2-p6| + |p3-p5|) / (2 * |p1-p4|)
+  const p1 = landmarks[indices[0]];
+  const p2 = landmarks[indices[1]];
+  const p3 = landmarks[indices[2]];
+  const p4 = landmarks[indices[3]];
+  const p5 = landmarks[indices[4]];
+  const p6 = landmarks[indices[5]];
+
+  const dist = (a: faceapi.Point, b: faceapi.Point) =>
+    Math.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2);
+
+  const v1 = dist(p2, p6);
+  const v2 = dist(p3, p5);
+  const h = dist(p1, p4);
+
+  return h > 0 ? (v1 + v2) / (2 * h) : 0;
+}
+
+function extractLiveness(
+  landmarks: faceapi.FaceLandmarks68,
+  expressions: faceapi.FaceExpressions
+): { blink: number; smile: number; mouthOpen: number; yaw: number } {
+  const pts = landmarks.positions;
+
+  // Blink: inverse of Eye Aspect Ratio (lower EAR = more closed)
+  const leftEAR = eyeAspectRatio(pts, [36, 37, 38, 39, 40, 41]);
+  const rightEAR = eyeAspectRatio(pts, [42, 43, 44, 45, 46, 47]);
+  const avgEAR = (leftEAR + rightEAR) / 2;
+  const blink = clamp(1 - avgEAR / 0.3, 0, 1); // 0.3 is typical open EAR
+
+  // Smile: from expression model
+  const smile = clamp(expressions.happy ?? 0, 0, 1);
+
+  // Mouth open: ratio of mouth height to width
+  const mouthTop = pts[62]; // upper inner lip
+  const mouthBottom = pts[66]; // lower inner lip
+  const mouthLeft = pts[60];
+  const mouthRight = pts[64];
+  const mouthH = Math.abs(mouthBottom.y - mouthTop.y);
+  const mouthW = Math.abs(mouthRight.x - mouthLeft.x);
+  const mouthOpen = mouthW > 0 ? clamp(mouthH / mouthW, 0, 1) : 0;
+
+  // Yaw: nose tip horizontal offset from face center
+  const noseTip = pts[30];
+  const jawLeft = pts[0];
+  const jawRight = pts[16];
+  const faceCenterX = (jawLeft.x + jawRight.x) / 2;
+  const faceWidth = Math.abs(jawRight.x - jawLeft.x);
+  const yaw = faceWidth > 0
+    ? clamp((noseTip.x - faceCenterX) / (faceWidth / 2), -1, 1)
+    : 0;
+
+  return { blink, smile, mouthOpen, yaw };
+}
+
+/* ─── Quality score ─── */
+
+function computeQualityScore(
+  detection: faceapi.FaceDetection,
+  landmarks: faceapi.FaceLandmarks68,
+  canvasWidth: number,
+  canvasHeight: number
+): number {
+  const box = detection.box;
+  const pts = landmarks.positions;
+
+  // 1. Detection confidence (35%)
+  const confidenceScore = clamp(detection.score, 0, 1);
+
+  // 2. Face size relative to image (25%)
+  const faceArea = (box.width * box.height) / (canvasWidth * canvasHeight);
+  const sizeScore = clamp(faceArea / 0.08, 0, 1);
+
+  // 3. Frontality / symmetry (25%)
+  const jawLeft = pts[0];
+  const jawRight = pts[16];
+  const noseTip = pts[30];
+  const faceCenterX = (jawLeft.x + jawRight.x) / 2;
+  const faceWidth = Math.abs(jawRight.x - jawLeft.x);
+  const asymmetry = faceWidth > 0
+    ? Math.abs(noseTip.x - faceCenterX) / (faceWidth / 2)
+    : 1;
+  const symmetryScore = clamp(1 - asymmetry, 0, 1);
+
+  // 4. Face fully within image (15%)
+  const margin = 5;
+  const inBounds =
+    box.x > margin &&
+    box.y > margin &&
+    box.x + box.width < canvasWidth - margin &&
+    box.y + box.height < canvasHeight - margin;
+  const boundsScore = inBounds ? 1 : 0.4;
+
+  return (
+    confidenceScore * 0.35 +
+    sizeScore * 0.25 +
+    symmetryScore * 0.25 +
+    boundsScore * 0.15
+  );
 }
 
 /* ─── Main detection function ─── */
 
 export async function detectBrowserFaces(file: File): Promise<BrowserFace[]> {
-  const image = await createImageFromFile(file);
-  const landmarker = await getLandmarker();
-  const result = landmarker.detect(image);
+  await ensureModelsLoaded();
 
-  const landmarksPerFace = result.faceLandmarks ?? [];
-  const blendshapesPerFace = result.faceBlendshapes ?? [];
+  // Preprocess: EXIF normalization, resize, auto-contrast
+  const canvas = await preprocessImage(file);
 
-  const faces: BrowserFace[] = [];
+  // Detect all faces with landmarks, descriptors, and expressions
+  const detections = await faceapi
+    .detectAllFaces(canvas, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.3 }))
+    .withFaceLandmarks()
+    .withFaceDescriptors()
+    .withFaceExpressions();
 
-  for (let index = 0; index < landmarksPerFace.length; index += 1) {
-    const landmarks = landmarksPerFace[index] ?? [];
-    if (!landmarks.length) continue;
+  const results: BrowserFace[] = [];
 
-    const blendshapeCategories = (blendshapesPerFace[index]?.categories ??
-      []) as Array<{ categoryName: string; score: number }>;
+  for (const det of detections) {
+    const box = det.detection.box;
+    const embedding = padEmbedding(det.descriptor);
+    const liveness = extractLiveness(det.landmarks, det.expressions);
     const qualityScore = computeQualityScore(
-      landmarks as Array<{ x: number; y: number; z: number }>,
-      image.naturalWidth,
-      image.naturalHeight
+      det.detection,
+      det.landmarks,
+      canvas.width,
+      canvas.height
     );
 
-    faces.push({
-      bbox: computeBox(
-        landmarks as Array<{ x: number; y: number }>,
-        image.naturalWidth,
-        image.naturalHeight
-      ),
-      qualityScore,
-      // NEW: Expression-invariant geometric embedding for identity
-      embedding: createGeometricEmbedding(
-        landmarks as Array<{ x: number; y: number; z: number }>
-      ),
-      // Liveness signals stay separate (blendshape-based)
-      liveness: {
-        blink: Math.max(
-          getBlendshapeScore(blendshapeCategories, "eyeBlinkLeft"),
-          getBlendshapeScore(blendshapeCategories, "eyeBlinkRight")
-        ),
-        smile:
-          (getBlendshapeScore(blendshapeCategories, "mouthSmileLeft") +
-            getBlendshapeScore(blendshapeCategories, "mouthSmileRight")) /
-          2,
-        mouthOpen: getBlendshapeScore(blendshapeCategories, "jawOpen"),
-        yaw: estimateYaw(landmarks as Array<{ x: number; y: number }>),
+    results.push({
+      bbox: {
+        x: Math.round(box.x),
+        y: Math.round(box.y),
+        w: Math.round(box.width),
+        h: Math.round(box.height),
       },
+      qualityScore,
+      embedding,
+      liveness,
     });
   }
 
-  return faces;
+  return results;
 }
