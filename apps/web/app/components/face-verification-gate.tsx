@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
+import { useAuth } from "@/app/components/auth-provider";
 import { apiFetch } from "@/lib/api-client";
 import { detectBrowserFaces } from "@/lib/browser-face";
 import { cosineSimilarity } from "@/lib/embeddings";
@@ -39,9 +39,8 @@ function fileFromDataUrl(dataUrl: string) {
 export function FaceVerificationGate() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const { user, loading: authLoading } = useAuth();
 
-  const [authLoading, setAuthLoading] = useState(true);
-  const [isSignedIn, setIsSignedIn] = useState(false);
   const [stateLoading, setStateLoading] = useState(false);
   const [verifyState, setVerifyState] = useState<VerifyState | null>(null);
   const [cameraReady, setCameraReady] = useState(false);
@@ -50,20 +49,7 @@ export function FaceVerificationGate() {
   const [message, setMessage] = useState("");
   const [challenge, setChallenge] = useState<VerifyChallenge>("blink");
 
-  useEffect(() => {
-    const supabase = getSupabaseBrowserClient();
-    supabase.auth
-      .getUser()
-      .then(({ data }) => setIsSignedIn(Boolean(data.user)))
-      .finally(() => setAuthLoading(false));
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setIsSignedIn(Boolean(session?.user));
-    });
-    return () => subscription.unsubscribe();
-  }, []);
+  const isSignedIn = Boolean(user);
 
   useEffect(() => {
     if (!isSignedIn) {
