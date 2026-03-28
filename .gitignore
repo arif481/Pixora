@@ -3,22 +3,33 @@ node_modules/
 .npm/
 .next/
 out/
+coverage/
+dist/
+*.tsbuildinfo
 
 # Env
 .env
 .env.local
 .env.*.local
+.envrc
 
 # Python
 __pycache__/
 *.pyc
 .venv/
 venv/
+.pytest_cache/
+.ruff_cache/
 
 # Logs
 *.log
 
 # OS
 .DS_Store
+.idea/
+.turbo/
 .vercel
-.env*.local
+
+# Editors
+*.swp
+*.swo

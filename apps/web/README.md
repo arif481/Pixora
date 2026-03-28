@@ -1,44 +1,42 @@
 # Pixora Web App
 
-## Run locally
+The web app is a Next.js application that serves both the product UI and the `/api/v1/*` backend routes used by the product.
 
-1. Copy `.env.example` to `.env.local` and fill values.
-2. Install dependencies:
-   - From repo root: `npm install`
-3. Start dev server:
+## Local Setup
+
+1. Copy `.env.example` to `.env.local`
+2. Fill in the required Supabase and worker values
+3. Install dependencies from the repository root with `npm ci`
+4. Start the app from the repository root:
    - `npm run dev:web`
 
-## Current feature status
+## Commands
 
-- Group creation/listing
-- Group photo upload + registration flow
-- Enrollment UI with on-device face embedding
-- Shared-with-me feed
-- Supabase-backed API routes under `app/api/v1/*`
-- Processing worker pipeline (`processing_jobs` -> match -> share/review)
-- JWT-based API user resolution from Supabase bearer token
-- Client auth UI (email/password sign-in/sign-up) with bearer token forwarding on API requests
+- `npm run dev -w apps/web`
+- `npm run lint -w apps/web`
+- `npm run typecheck -w apps/web`
+- `npm run build -w apps/web`
 
-## Next integration steps
+## Responsibilities
 
-- Add scheduled trigger (Vercel cron/GitHub Actions) to call `POST /api/v1/internal/process-next`.
-- Add confidence tuning and duplicate-face suppression strategies.
+- Authentication UI and bearer-token forwarding
+- Face enrollment and live verification experiences
+- Group creation, membership, and photo upload flows
+- Share listing and access control
+- Internal worker trigger endpoint
 
-## Face processing mode
+## Environment Variables
 
-- Default mode is browser-side embedding (`@mediapipe/tasks-vision`) with no external inference service required.
+See [.env.example](.env.example) for the current set of supported variables, including:
 
-## Auth behavior
+- Supabase client and service credentials
+- worker authentication
+- enrollment thresholds
+- live verification thresholds
+- matching and auto-share thresholds
 
-- Production mode expects `Authorization: Bearer <supabase_access_token>`.
-- API requests without a valid Supabase bearer token are rejected as unauthorized.
+## Operational Notes
 
-## Trigger worker manually
-
-Use your worker token in the Authorization header:
-
-`curl -X POST http://localhost:3000/api/v1/internal/process-next -H "Authorization: Bearer $INTERNAL_WORKER_TOKEN"`
-
-## GitHub cron
-
-Use `.github/workflows/process-worker-cron.yml` to trigger the worker in production.
+- The production worker should call `POST /api/v1/internal/process-next`
+- The scheduled GitHub workflow lives at [process-worker-cron.yml](../../.github/workflows/process-worker-cron.yml)
+- Deployment steps and required infrastructure are documented in [deploy-runbook.md](../../docs/deploy-runbook.md)

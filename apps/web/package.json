@@ -2,11 +2,16 @@
   "name": "pixora-web",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=20.11 <23",
+    "npm": ">=10"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "^0.10.14",

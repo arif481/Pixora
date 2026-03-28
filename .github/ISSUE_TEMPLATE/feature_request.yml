@@ -1,0 +1,30 @@
+name: Feature Request
+description: Propose a product, developer experience, or infrastructure improvement.
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or Opportunity
+      description: What problem are we trying to solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed Solution
+      description: Describe the change you want to see.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: List alternatives or tradeoffs already considered.
+  - type: textarea
+    id: success
+    attributes:
+      label: Success Criteria
+      description: How should we know this request is complete?

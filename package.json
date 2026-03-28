@@ -2,11 +2,20 @@
   "name": "pixora",
   "private": true,
   "version": "0.1.0",
+  "engines": {
+    "node": ">=20.11 <23",
+    "npm": ">=10"
+  },
   "workspaces": [
     "apps/*"
   ],
   "scripts": {
     "dev:web": "npm run dev -w apps/web",
-    "build:web": "npm run build -w apps/web"
+    "lint": "npm run lint -w apps/web",
+    "typecheck": "npm run typecheck -w apps/web",
+    "build:web": "npm run build -w apps/web",
+    "build": "npm run build:web",
+    "check": "npm run lint && npm run typecheck && npm run build",
+    "ci": "npm run check"
   }
 }

@@ -1,52 +1,69 @@
 # Pixora
 
-Privacy-first group photo sharing powered by face verification and face matching.
+Privacy-first group photo sharing powered by face enrollment, live verification, and face matching.
 
-## Repo structure
+## Repository Layout
 
-- `apps/web` — Next.js web app + API routes for core product flows
-- `db` — PostgreSQL schema, RLS, and seed data for Supabase
-- `docs` — architecture, product spec, API spec, deployment, implementation plan
-- `openapi/openapi.yaml` — API contract
+- `apps/web` — Next.js web app and API routes
+- `db` — PostgreSQL schema, RLS policies, seed data, and migrations
+- `docs` — product, architecture, API, deployment, and privacy documentation
+- `openapi/openapi.yaml` — API contract snapshot
+- `.github` — CI, cron, ownership, and contributor workflow files
 
-## Run locally
+## Prerequisites
 
-### 1) Web app
+- Node.js from [.nvmrc](.nvmrc)
+- npm `>=10`
+- Supabase project credentials for local development
 
-1. `cd apps/web`
-2. Copy `.env.example` to `.env.local`
-3. `npm install`
-4. `npm run dev`
+## Quick Start
 
-## MVP features included
+1. Install dependencies from the repository root:
+   - `npm ci`
+2. Copy `apps/web/.env.example` to `apps/web/.env.local`
+3. Fill in the required Supabase and worker values
+4. Start the web app:
+   - `npm run dev:web`
 
-- Face enrollment flow with consent check and browser-side face embedding
-- Group create/list UI backed by Supabase
-- Group photo upload-url + registration flow backed by Supabase
-- Shares feed backed by Supabase
-- Enrollment session validation and template persistence
+## Standard Commands
 
-## Next production wiring steps
+- `npm run dev:web` — run the Next.js app locally
+- `npm run lint` — run ESLint for the web app
+- `npm run typecheck` — run TypeScript checks
+- `npm run build` — create a production build
+- `npm run ci` — run the default repository quality gate
 
-1. Run SQL scripts in `db/` and enforce RLS policies.
-2. Provision storage buckets (`photos-private`, `thumbs-private`, `enrollment-private`).
-3. Configure scheduler to call `POST /api/v1/internal/process-next` with worker token.
-4. Deploy per `docs/deploy-free-tier.md`.
+## Core Product Flows
 
-## GitHub scheduler setup
+- Face enrollment with biometric consent
+- Live face verification before protected actions
+- Group creation and membership flows
+- Browser-side face detection on photo upload
+- Worker-driven face matching and share creation
 
-Workflow file: `.github/workflows/process-worker-cron.yml`
+## Deployment And Operations
 
-Configure these repository secrets in GitHub:
+- Deployment checklist: [deploy-runbook.md](docs/deploy-runbook.md)
+- Privacy and biometric guidance: [security-privacy.md](docs/security-privacy.md)
+- Architecture overview: [architecture.md](docs/architecture.md)
+- API expectations: [api-spec.md](docs/api-spec.md)
 
-- `PIXORA_BASE_URL` (set this to your active web deployment URL)
-- `INTERNAL_WORKER_TOKEN` (must match `apps/web/.env.example` value in your deployed app env)
+## GitHub Automation
 
-The workflow runs every minute and can also be triggered manually from GitHub Actions.
+- CI runs on pushes to `main` and on pull requests
+- Dependency updates are configured with Dependabot
+- Worker processing is triggered by `.github/workflows/process-worker-cron.yml`
 
-## Deploy quickly
+Required repository secrets for the worker cron:
 
-- Generate exact env commands from your local secrets:
-	- `bash scripts/deploy_env_prep.sh`
-- Follow full deployment checklist:
-	- `docs/deploy-runbook.md`
+- `PIXORA_BASE_URL`
+- `INTERNAL_WORKER_TOKEN`
+
+## Working In This Repo
+
+- Contribution guide: [CONTRIBUTING.md](CONTRIBUTING.md)
+- Security policy: [SECURITY.md](SECURITY.md)
+
+## Notes
+
+- Local-only files such as `.env.local`, `.vercel/`, and virtual environments should stay uncommitted.

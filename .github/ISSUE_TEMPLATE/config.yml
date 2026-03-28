@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security reports
+    url: https://github.com/arif481/Pixora/security/advisories/new
+    about: Please report sensitive vulnerabilities privately.
