@@ -175,19 +175,12 @@ function evaluatePassiveWindow(probes: FaceProbe[]): WindowFeedback {
   const centerYs = probes.map((probe) => probe.centerY);
   const faceRatios = probes.map((probe) => probe.faceRatio);
   const sharpnessScores = probes.map((probe) => probe.sharpness);
+  const avgTexture = average(textureScores);
 
   if (Math.min(...qualityScores) < 0.48 || average(qualityScores) < 0.58) {
     return {
       ok: false,
       reason: "Need a slightly clearer face before we continue.",
-      tone: "warn",
-    };
-  }
-
-  if (average(textureScores) < 0.14) {
-    return {
-      ok: false,
-      reason: "Use your live face rather than a photo or screen.",
       tone: "warn",
     };
   }
@@ -241,6 +234,15 @@ function evaluatePassiveWindow(probes: FaceProbe[]): WindowFeedback {
     motion >= 0.035 ||
     faceSizeRange >= 0.025;
 
+  if (avgTexture < 0.08 && !hasNaturalMotion) {
+    return {
+      ok: false,
+      reason: "The camera feed looks soft. Try brighter light or a little natural movement.",
+      tone: "neutral",
+      fallbackToChallenge: true,
+    };
+  }
+
   if (!hasNaturalMotion) {
     return {
       ok: false,
@@ -278,15 +280,6 @@ function evaluateChallengeWindow(
     };
   }
 
-  const avgTexture = average(probes.map((probe) => probe.textureScore));
-  if (avgTexture < 0.14) {
-    return {
-      ok: false,
-      reason: "Use your live face rather than a photo or screen.",
-      tone: "warn",
-    };
-  }
-
   const base = [...probes].sort((left, right) => right.qualityScore - left.qualityScore)[0];
   const similarities = probes
     .filter((probe) => probe !== base)
@@ -308,6 +301,7 @@ function evaluateChallengeWindow(
   const blinkRange = Math.max(...blinks) - Math.min(...blinks);
   const smileRange = Math.max(...smiles) - Math.min(...smiles);
   const yawRange = Math.max(...yaws) - Math.min(...yaws);
+  const avgTexture = average(probes.map((probe) => probe.textureScore));
   const motion =
     Math.max(...centerXs) - Math.min(...centerXs) + (Math.max(...centerYs) - Math.min(...centerYs));
 
@@ -339,6 +333,14 @@ function evaluateChallengeWindow(
     };
   }
 
+  if (avgTexture < 0.06 && motion < 0.02 && yawRange < 0.05 && blinkRange < 0.12 && smileRange < 0.12) {
+    return {
+      ok: false,
+      reason: "The camera feed looks too flat. Try brighter light or bring the phone a bit closer.",
+      tone: "neutral",
+    };
+  }
+
   return {
     ok: true,
     reason: "Challenge complete. Finishing verification.",
@@ -349,8 +351,8 @@ function evaluateChallengeWindow(
 function selectVerificationProbes(probes: FaceProbe[]) {
   return [...probes]
     .sort((left, right) => {
-      const leftScore = left.qualityScore * 0.6 + left.sharpness * 0.2 + left.textureScore * 0.2;
-      const rightScore = right.qualityScore * 0.6 + right.sharpness * 0.2 + right.textureScore * 0.2;
+      const leftScore = left.qualityScore * 0.7 + left.sharpness * 0.2 + left.textureScore * 0.1;
+      const rightScore = right.qualityScore * 0.7 + right.sharpness * 0.2 + right.textureScore * 0.1;
       return rightScore - leftScore;
     })
     .slice(0, 3);
