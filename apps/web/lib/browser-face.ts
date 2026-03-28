@@ -209,9 +209,8 @@ function adaptiveHistogramEqualization(
 
 /* ═══ Image Preprocessing ═══ */
 
-async function preprocessImage(file: File): Promise<HTMLCanvasElement> {
-  const bitmap = await createImageBitmap(file);
-  let { width, height } = bitmap;
+function normalizeCanvasForDetection(sourceCanvas: HTMLCanvasElement): HTMLCanvasElement {
+  let { width, height } = sourceCanvas;
 
   if (width > MAX_IMAGE_DIM || height > MAX_IMAGE_DIM) {
     const scale = MAX_IMAGE_DIM / Math.max(width, height);
@@ -223,14 +222,25 @@ async function preprocessImage(file: File): Promise<HTMLCanvasElement> {
   canvas.width = width;
   canvas.height = height;
   const ctx = canvas.getContext("2d")!;
-  ctx.drawImage(bitmap, 0, 0, width, height);
-  bitmap.close();
+  ctx.drawImage(sourceCanvas, 0, 0, width, height);
 
   const imageData = ctx.getImageData(0, 0, width, height);
   adaptiveHistogramEqualization(imageData);
   ctx.putImageData(imageData, 0, 0);
 
   return canvas;
+}
+
+async function preprocessImage(file: File): Promise<HTMLCanvasElement> {
+  const bitmap = await createImageBitmap(file);
+  const canvas = document.createElement("canvas");
+  canvas.width = bitmap.width;
+  canvas.height = bitmap.height;
+  const ctx = canvas.getContext("2d")!;
+  ctx.drawImage(bitmap, 0, 0, bitmap.width, bitmap.height);
+  bitmap.close();
+
+  return normalizeCanvasForDetection(canvas);
 }
 
 /* ═══ Face Alignment ═══ */
@@ -537,11 +547,8 @@ async function robustDetect(canvas: HTMLCanvasElement): Promise<FullDetection[]>
 
 /* ═══ Main Detection ═══ */
 
-export async function detectBrowserFaces(file: File): Promise<BrowserFace[]> {
-  await ensureModelsLoaded();
+async function detectBrowserFacesFromPreparedCanvas(canvas: HTMLCanvasElement): Promise<BrowserFace[]> {
   const fa = api();
-
-  const canvas = await preprocessImage(file);
   const detections = await robustDetect(canvas);
   const results: BrowserFace[] = [];
 
@@ -580,6 +587,18 @@ export async function detectBrowserFaces(file: File): Promise<BrowserFace[]> {
   }
 
   return results;
+}
+
+export async function detectBrowserFaces(file: File): Promise<BrowserFace[]> {
+  await ensureModelsLoaded();
+  const canvas = await preprocessImage(file);
+  return detectBrowserFacesFromPreparedCanvas(canvas);
+}
+
+export async function detectBrowserFacesFromCanvas(sourceCanvas: HTMLCanvasElement): Promise<BrowserFace[]> {
+  await ensureModelsLoaded();
+  const canvas = normalizeCanvasForDetection(sourceCanvas);
+  return detectBrowserFacesFromPreparedCanvas(canvas);
 }
 
 /* ═══ Outlier Filtering (enrollment batches) ═══ */
