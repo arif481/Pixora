@@ -15,7 +15,7 @@
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "^0.10.14",
-    "@supabase/supabase-js": "^2.100.1",
+    "@supabase/supabase-js": "^2.101.1",
     "@vladmandic/face-api": "^1.7.15",
     "next": "16.2.1",
     "react": "19.0.0",
