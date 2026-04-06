@@ -566,7 +566,11 @@ export function FaceVerificationGate() {
 
         const payload = await response.json();
         if (!response.ok) {
-          if (source === "passive") {
+          const messageFromServer = payload?.error ?? "Live verification failed";
+          const shouldFallbackToChallenge =
+            response.status === 403 && messageFromServer === "Face verification failed";
+
+          if (shouldFallbackToChallenge && source === "passive") {
             const nextChallenge = randomChallenge();
             setChallenge(nextChallenge);
             challengeRef.current = nextChallenge;
@@ -576,15 +580,25 @@ export function FaceVerificationGate() {
             setGuidance(`Almost done. ${CHALLENGE_LABELS[nextChallenge]}.`);
             setGuidanceTone("neutral");
             setProgress(12);
-          } else {
+            return;
+          }
+
+          if (shouldFallbackToChallenge) {
             modeRef.current = "challenge";
             setMode("challenge");
             challengeProbesRef.current = [];
-            setGuidance(payload?.error ?? "Try the guided action once more.");
+            setGuidance("Try the guided action once more.");
             setGuidanceTone("warn");
             setProgress(8);
+            return;
           }
 
+          modeRef.current = "align";
+          setMode("align");
+          setError(messageFromServer);
+          setGuidance(messageFromServer);
+          setGuidanceTone("warn");
+          setProgress(0);
           return;
         }
 
@@ -779,7 +793,9 @@ export function FaceVerificationGate() {
     resetAnalysisState("align");
     setGuidance("Center your face in the oval to begin.");
     setGuidanceTone("neutral");
-    setChallenge(randomChallenge());
+    const nextChallenge = randomChallenge();
+    setChallenge(nextChallenge);
+    challengeRef.current = nextChallenge;
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({

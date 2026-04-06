@@ -4,7 +4,7 @@ import { createSupabaseServerClient } from "@/lib/supabase-server";
 import { getRequestUserId } from "@/lib/request-user";
 
 const LOGIN_VERIFY_THRESHOLD = Number(process.env.LOGIN_VERIFY_THRESHOLD ?? 0.62);
-const LOGIN_VERIFY_MIN_QUALITY = Number(process.env.LOGIN_VERIFY_MIN_QUALITY ?? 0.55);
+const LOGIN_VERIFY_MIN_QUALITY = Number(process.env.LOGIN_VERIFY_MIN_QUALITY ?? 0.5);
 const LOGIN_VERIFY_WINDOW_MINUTES = Number(process.env.LOGIN_VERIFY_WINDOW_MINUTES ?? 5);
 const LOGIN_VERIFY_MAX_ATTEMPTS = Number(process.env.LOGIN_VERIFY_MAX_ATTEMPTS ?? 8);
 const WINDOW_SCORE_WEIGHTS = [0.5, 0.3, 0.2];
@@ -51,7 +51,9 @@ export async function POST(request: NextRequest) {
           .filter((score: number) => Number.isFinite(score))
       : [];
     const qualityScore =
-      qualityScores.length > 0 ? average(qualityScores) : Number(body?.qualityScore ?? 0);
+      qualityScores.length > 0
+        ? Math.max(...qualityScores)
+        : Number(body?.qualityScore ?? 0);
 
     if (probes.length === 0) {
       return NextResponse.json(
