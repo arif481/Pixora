@@ -19,7 +19,7 @@
     "@vladmandic/face-api": "^1.7.15",
     "next": "16.2.1",
     "react": "19.0.0",
-    "react-dom": "19.0.0"
+    "react-dom": "19.2.4"
   },
   "devDependencies": {
     "@types/node": "^22.13.11",
