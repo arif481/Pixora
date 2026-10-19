@@ -2,7 +2,7 @@
 
 Privacy-first group photo sharing powered by face enrollment, live verification, and face matching.
 
-## Repository Layout
+## Repository layout
 
 - `apps/web` — Next.js web app and API routes
 - `db` — PostgreSQL schema, RLS policies, seed data, and migrations
@@ -16,7 +16,7 @@ Privacy-first group photo sharing powered by face enrollment, live verification,
 - npm `>=10`
 - Supabase project credentials for local development
 
-## Quick Start
+## Quick start
 
 1. Install dependencies from the repository root:
    - `npm ci`
@@ -25,7 +25,7 @@ Privacy-first group photo sharing powered by face enrollment, live verification,
 4. Start the web app:
    - `npm run dev:web`
 
-## Standard Commands
+## Commands
 
 - `npm run dev:web` — run the Next.js app locally
 - `npm run lint` — run ESLint for the web app
@@ -33,7 +33,7 @@ Privacy-first group photo sharing powered by face enrollment, live verification,
 - `npm run build` — create a production build
 - `npm run ci` — run the default repository quality gate
 
-## Core Product Flows
+## Core product flows
 
 - Face enrollment with biometric consent
 - Live face verification before protected actions
@@ -41,14 +41,14 @@ Privacy-first group photo sharing powered by face enrollment, live verification,
 - Browser-side face detection on photo upload
 - Worker-driven face matching and share creation
 
-## Deployment And Operations
+## Deployment and operations
 
 - Deployment checklist: [deploy-runbook.md](docs/deploy-runbook.md)
 - Privacy and biometric guidance: [security-privacy.md](docs/security-privacy.md)
 - Architecture overview: [architecture.md](docs/architecture.md)
 - API expectations: [api-spec.md](docs/api-spec.md)
 
-## GitHub Automation
+## GitHub automation
 
 - CI runs on pushes to `main` and on pull requests
 - Dependency updates are configured with Dependabot
@@ -59,7 +59,7 @@ Required repository secrets for the worker cron:
 - `PIXORA_BASE_URL`
 - `INTERNAL_WORKER_TOKEN`
 
-## Working In This Repo
+## Working in this repo
 
 - Contribution guide: [CONTRIBUTING.md](CONTRIBUTING.md)
 - Security policy: [SECURITY.md](SECURITY.md)
