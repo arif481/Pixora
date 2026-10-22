@@ -89,6 +89,7 @@ export async function POST(request: NextRequest) {
       .from("face_templates")
       .select("embedding")
       .eq("user_id", userId)
+      .eq("source", "enrollment")
       .order("is_primary", { ascending: false });
 
     if (!templates || templates.length === 0) {
