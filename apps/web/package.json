@@ -18,8 +18,8 @@
     "@supabase/supabase-js": "^2.101.1",
     "@vladmandic/face-api": "^1.7.15",
     "next": "16.2.1",
-    "react": "19.0.0",
-    "react-dom": "19.0.0"
+    "react": "19.2.9",
+    "react-dom": "19.2.9"
   },
   "devDependencies": {
     "@types/node": "^25.5.2",

@@ -8,6 +8,17 @@ updates:
     open-pull-requests-limit: 5
     labels:
       - dependencies
+    groups:
+      # React refuses to run when react and react-dom are on different versions
+      react:
+        patterns:
+          - react
+          - react-dom
+      # eslint-config-next is released with each next version
+      next:
+        patterns:
+          - next
+          - eslint-config-next
 
   - package-ecosystem: github-actions
     directory: /
