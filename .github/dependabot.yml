@@ -8,6 +8,12 @@ updates:
     open-pull-requests-limit: 5
     labels:
       - dependencies
+    groups:
+      # React refuses to run when react and react-dom are on different versions
+      react:
+        patterns:
+          - react
+          - react-dom
 
   - package-ecosystem: github-actions
     directory: /
